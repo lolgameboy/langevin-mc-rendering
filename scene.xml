@@ -1,9 +1,7 @@
 <scene version="3.0.0">
 	<default name="spp" value="50" />
-	<default name="resy" value="1024" />
-	<default name="resx" value="1024" />
-	<integrator type="path">
-	</integrator>
+	<default name="resy" value="16" />
+	<default name="resx" value="16" />
 	<sensor type="perspective">
 		<float name="fov" value="19.5" />
 		<transform name="to_world">
@@ -17,7 +15,6 @@
 			<integer name="height" value="$resy" />
 			<string name="file_format" value="openexr" />
 			<string name="pixel_format" value="rgb" />
-			<rfilter type="tent" />
 		</film>
 	</sensor>
 	<bsdf type="twosided" id="LeftWallBSDF">

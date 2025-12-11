@@ -1,114 +1,114 @@
 import drjit as dr
 import mitsuba as mi
 
-mi.set_variant('llvm_ad_rgb')
+from pss_sampler import PssSampler
 
 class Pss(mi.Integrator):
-    def __init__(self, props):
+    def __init__(self):
         pass
-   
+    
     def render(self, scene: mi.Scene, sensor: mi.Sensor, seed: mi.UInt = 0, spp: int = 0, develop: bool = True, evaluate: bool = True) -> mi.TensorXf:
-        size = sensor.film().crop_size()
-        image = dr.zeros(mi.TensorXf, (size.x, size.y))
-        return image
+        film = sensor.film()
+        resolution = film.crop_size()
 
-    def cancel(self) -> None:
-        pass
+        image_block = mi.ImageBlock(
+            resolution,
+            mi.ScalarPoint2i(0,0),
+            3
+        )
 
-    def should_stop(self) -> bool:
-        pass
+        cam_transform = sensor.m_to_world
+        rng = dr.rng(0)
 
-    def aov_names(self) -> list[str]:
-        pass
+        # Instantiate a path tracer object
+        pathtracer = mi.load_dict({
+            'type': 'path',
+            'max_depth': 4
+        })
+        
+        # Determine size of "physical" image plane from fov parameter
+        x_fov = mi.traverse(sensor)["x_fov"]
+        plane_height = dr.tan(x_fov / 2)
+        plane_size = mi.Vector2f(plane_height, plane_height)
 
-    def skip_area_emitters(self, arg0: mi.Scene, arg1: mi.Ray3f, arg2: bool, arg3: mi.Bool, /) -> mi.PreliminaryIntersection3f:
-        pass
+        # Initial sample
+        sample = [0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5]
+        luminance, res, pixel_x, pixel_y = self.calculate_sample_contribution(sample, scene, pathtracer, cam_transform, plane_size, resolution)
 
+        image_block.put(mi.Point2f(pixel_x, pixel_y), res[0] / luminance)
 
-class MyBSDF(mi.BSDF):
-    def __init__(self, props):
-        mi.BSDF.__init__(self, props)
+        N = 1000
+        for i in range(N):
+            # Generate proposal mutation
+            mutation = rng.normal(mi.Float, 20) * 0.1
+            # mutation = [0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05]
+            prop_sample = []
+            for i in range(len(sample)):   
+                prop_sample.append(sample[i] + mutation[i])
+            print(type(prop_sample)) # TODO Probleem hier is da die terug naar Float convert. Maar mss is het een beter idee
+            # om uit te vogelen hoe ik het **met** drjit arrays kan laten werken, anders is da toch wa dom precies om da te
+            # proberen omzeilen met python arrays, ni?
 
-        # Read 'eta' and 'tint' properties from `props`
-        self.eta = 1.33
-        if props.has_property('eta'):
-            self.eta = props['eta']
+            # Boundary conditions: loop around
+            for i in range(len(prop_sample)):
+                if prop_sample[i] < 0:
+                    prop_sample[i] += 1
+                if prop_sample[i] > 1:
+                    prop_sample[i] -= 1
 
-        self.tint = mi.Color3f(props['tint'])
+            # TODO make it more efficient (if it is worth it)
+            # if prop_sample < 0:
+            #    prop_sample += 1
+            #if prop_sample > 1:
+            #    prop_sample -= 1
 
-        # Set the BSDF flags
-        reflection_flags   = mi.BSDFFlags.DeltaReflection   | mi.BSDFFlags.FrontSide | mi.BSDFFlags.BackSide
-        transmission_flags = mi.BSDFFlags.DeltaTransmission | mi.BSDFFlags.FrontSide | mi.BSDFFlags.BackSide
-        self.m_components  = [reflection_flags, transmission_flags]
-        self.m_flags = reflection_flags | transmission_flags
+            # Calculate proposal luminance
+            prop_luminance, prop_res, prop_pixel_x, prop_pixel_y = self.calculate_sample_contribution(prop_sample, scene, pathtracer, cam_transform, plane_size, resolution)
+            
+            # Calculate acceptence chance            
+            a = min(1, prop_luminance / luminance)
 
-    def sample(self, ctx, si, sample1, sample2, active):
-        # Compute Fresnel terms
-        cos_theta_i = mi.Frame3f.cos_theta(si.wi)
-        r_i, cos_theta_t, eta_it, eta_ti = mi.fresnel(cos_theta_i, self.eta)
-        t_i = dr.maximum(1.0 - r_i, 0.0)
+            print(a)
 
-        # Pick between reflection and transmission
-        selected_r = (sample1 <= r_i) & active
+            if rng.uniform(mi.Float, 1) < a:
+               luminance, res, pixel_x, pixel_y = prop_luminance, prop_res, prop_pixel_x, prop_pixel_y
+               sample = prop_sample
 
-        # Fill up the BSDFSample struct
-        bs = mi.BSDFSample3f()
-        bs.pdf = dr.select(selected_r, r_i, t_i)
-        bs.sampled_component = dr.select(selected_r, mi.UInt32(0), mi.UInt32(1))
-        bs.sampled_type      = dr.select(selected_r, mi.UInt32(+mi.BSDFFlags.DeltaReflection),
-                                                     mi.UInt32(+mi.BSDFFlags.DeltaTransmission))
-        bs.wo = dr.select(selected_r,
-                          mi.reflect(si.wi),
-                          mi.refract(si.wi, cos_theta_t, eta_ti))
-        bs.eta = dr.select(selected_r, 1.0, eta_it)
+            # Explanation: PSSMLT actually uses luminance (combination of RGB values) to explore domain 
+            # (because it only takes a scalar output) to mutate the sample)
+            # Then it intuitively counts pixel visits to determine luminance distribution over the whole image
+            # BUT! We use RGB channels. Thus, we must keep track of how this luminance is "divided" amongst the different colors.
+            # So instead of counting "1" to the pixel, we count the fractions of colors, and they average to 1.
+            # print("RES")
+            # print(res[0] / luminance)
+            image_block.put(mi.Point2f(pixel_x, pixel_y), res[0] / luminance)
+        
+        # Samples have now simply counted all samples per bucket. 
+        # Now we must appropriately devide the whole image to get a proper distribution that integrates to 1
+        # We must devide by sample count and multiply by buckets (reasoning: 1D uniform integral, 2 buckets, 10 samples)
+        print(image_block.tensor() / N * resolution.x * resolution.y)
+        return image_block.tensor() / N * resolution.x * resolution.y
+    
+    def calculate_sample_contribution(self, sample, scene, pathtracer, cam_transform, plane_size, resolution):
+        pss_sampler = PssSampler(sample)
 
-        # For reflection, tint based on the incident angle (more tint at grazing angle)
-        value_r = dr.lerp(mi.Color3f(self.tint), mi.Color3f(1.0), dr.clip(cos_theta_i, 0.0, 1.0))
+        # Sample an initial ray through the image plane
+        ray_origin_local = mi.Vector3f(0, 0, 0)
+        rand_x = pss_sampler.next_1d()
+        rand_y = pss_sampler.next_1d()
+        x = -plane_size.x / 2 + rand_x * plane_size.x
+        y = -plane_size.y / 2 + rand_y * plane_size.y
+        ray_direction_local = dr.normalize(mi.Vector3f(x, y, 1))
 
-        # For transmission, radiance must be scaled to account for the solid angle compression
-        value_t = mi.Color3f(1.0) * dr.square(eta_ti)
+        # Also determine affected pixel already
+        pixel_x = rand_x * resolution.x
+        pixel_y = rand_y * resolution.y
 
-        value = dr.select(selected_r, value_r, value_t)
+        ray = mi.Ray3f(o=cam_transform.translation() + ray_origin_local, d=cam_transform.transform_affine(ray_direction_local))
+        diffray = mi.RayDifferential3f(ray)
 
-        return (bs, value)
+        # Sample this ray
+        res = pathtracer.sample(scene, pss_sampler, diffray)
+        luminance = dr.sum(res[0]) / 3 # TODO This is where luminance weights come in, now I use equal weights
 
-    def eval(self, ctx, si, wo, active):
-        return 0.0
-
-    def pdf(self, ctx, si, wo, active):
-        return 0.0
-
-    def eval_pdf(self, ctx, si, wo, active):
-        return 0.0, 0.0
-
-    def traverse(self, cb):
-        cb.put('tint', self.tint, mi.ParamFlags.Differentiable)
-
-    def parameters_changed(self, keys):
-        print("🏝️ there is nothing to do here 🏝️")
-
-    def to_string(self):
-        return ('MyBSDF[\n'
-                '    eta=%s,\n'
-                '    tint=%s,\n'
-                ']' % (self.eta, self.tint))
-
-mi.register_bsdf("mybsdf", lambda props: MyBSDF(props))
-
-mi.register_integrator("psst", lambda props: Pss(props))
-
-pss = Pss([])
-pss.cancel()
-scene = mi.load_file("scene.xml")
-print(pss.render(scene, scene.sensors()[0]))
-
-my_int = mi.load_dict({
-    'type' : 'psst',
-    'tint' : [0.2, 0.9, 0.2],
-    'eta' : 1.33
-})
-
-print(my_int)
-
-print(mi.PluginManager.instance().plugin_type("psst"))
-print(mi.PluginManager.instance().plugin_type("mybsdf"))
+        return luminance, res, pixel_x, pixel_y
