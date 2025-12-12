@@ -7,6 +7,7 @@ class Pss(mi.Integrator):
     def __init__(self):
         pass
     
+    @dr.syntax
     def render(self, scene: mi.Scene, sensor: mi.Sensor, seed: mi.UInt = 0, spp: int = 0, develop: bool = True, evaluate: bool = True) -> mi.TensorXf:
         film = sensor.film()
         resolution = film.crop_size()
@@ -25,6 +26,8 @@ class Pss(mi.Integrator):
             'type': 'path',
             'max_depth': 4
         })
+
+        sample_size = 15
         
         # Determine size of "physical" image plane from fov parameter
         x_fov = mi.traverse(sensor)["x_fov"]
@@ -32,22 +35,21 @@ class Pss(mi.Integrator):
         plane_size = mi.Vector2f(plane_height, plane_height)
 
         # Initial sample
-        sample = [0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5]
+        sample = dr.full(mi.ArrayXf, 0.5, (sample_size,1)) # [0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5]
+        print(sample)
         luminance, res, pixel_x, pixel_y = self.calculate_sample_contribution(sample, scene, pathtracer, cam_transform, plane_size, resolution)
 
         image_block.put(mi.Point2f(pixel_x, pixel_y), res[0] / luminance)
 
-        N = 1000
+        N = 10000
         for i in range(N):
             # Generate proposal mutation
-            mutation = rng.normal(mi.Float, 20) * 0.1
+            mutation = rng.normal(mi.ArrayXf, (sample_size,1)) * 0.1
             # mutation = [0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05]
-            prop_sample = []
-            for i in range(len(sample)):   
-                prop_sample.append(sample[i] + mutation[i])
-            print(type(prop_sample)) # TODO Probleem hier is da die terug naar Float convert. Maar mss is het een beter idee
-            # om uit te vogelen hoe ik het **met** drjit arrays kan laten werken, anders is da toch wa dom precies om da te
-            # proberen omzeilen met python arrays, ni?
+            # prop_sample = []
+            # for i in range(len(sample)):   
+            #    prop_sample.append(sample[i] + mutation[i])
+            prop_sample = sample + mutation
 
             # Boundary conditions: loop around
             for i in range(len(prop_sample)):
@@ -66,14 +68,16 @@ class Pss(mi.Integrator):
             prop_luminance, prop_res, prop_pixel_x, prop_pixel_y = self.calculate_sample_contribution(prop_sample, scene, pathtracer, cam_transform, plane_size, resolution)
             
             # Calculate acceptence chance            
-            a = min(1, prop_luminance / luminance)
+            a = dr.min(1, prop_luminance / luminance)
 
             print(a)
-
-            if rng.uniform(mi.Float, 1) < a:
+            # print(rng.uniform(mi.Float, 1)[0])
+            # TODO Is dit correct?
+            if rng.uniform(mi.Float, 1)[0] < a:
                luminance, res, pixel_x, pixel_y = prop_luminance, prop_res, prop_pixel_x, prop_pixel_y
                sample = prop_sample
 
+            print(sample)
             # Explanation: PSSMLT actually uses luminance (combination of RGB values) to explore domain 
             # (because it only takes a scalar output) to mutate the sample)
             # Then it intuitively counts pixel visits to determine luminance distribution over the whole image
@@ -86,8 +90,10 @@ class Pss(mi.Integrator):
         # Samples have now simply counted all samples per bucket. 
         # Now we must appropriately devide the whole image to get a proper distribution that integrates to 1
         # We must devide by sample count and multiply by buckets (reasoning: 1D uniform integral, 2 buckets, 10 samples)
-        print(image_block.tensor() / N * resolution.x * resolution.y)
-        return image_block.tensor() / N * resolution.x * resolution.y
+        # The / 2 is arbitrary. This determines overall brightness of image. 
+        # TODO: the / 2 (or even / 5) shows that a lot of samples are taken on the light itself
+        print(image_block.tensor() / N * resolution.x * resolution.y / 3)
+        return image_block.tensor() / N * resolution.x * resolution.y / 3
     
     def calculate_sample_contribution(self, sample, scene, pathtracer, cam_transform, plane_size, resolution):
         pss_sampler = PssSampler(sample)
@@ -101,8 +107,8 @@ class Pss(mi.Integrator):
         ray_direction_local = dr.normalize(mi.Vector3f(x, y, 1))
 
         # Also determine affected pixel already
-        pixel_x = rand_x * resolution.x
-        pixel_y = rand_y * resolution.y
+        pixel_x = mi.Float(rand_x * resolution.x)
+        pixel_y = mi.Float(rand_y * resolution.y)
 
         ray = mi.Ray3f(o=cam_transform.translation() + ray_origin_local, d=cam_transform.transform_affine(ray_direction_local))
         diffray = mi.RayDifferential3f(ray)

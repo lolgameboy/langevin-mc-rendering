@@ -1,15 +1,13 @@
 import drjit as dr
 import mitsuba as mi
 
+dr.set_flag(dr.JitFlag.Debug, True)
+
 # Before importing own code!
 mi.set_variant("llvm_ad_rgb")
 
 import matplotlib.pyplot as plt
 from pss_integrator import Pss
-
-#dr.set_flag(dr.JitFlag.Debug, True)
-
-
 
 
 
