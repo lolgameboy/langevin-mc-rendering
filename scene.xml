@@ -1,7 +1,7 @@
 <scene version="3.0.0">
 	<default name="spp" value="50" />
-	<default name="resy" value="32" />
-	<default name="resx" value="32" />
+	<default name="resy" value="1024" />
+	<default name="resx" value="1024" />
 	<sensor type="perspective">
 		<float name="fov" value="19.5" />
 		<transform name="to_world">
