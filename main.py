@@ -2,6 +2,7 @@ import drjit as dr
 import mitsuba as mi
 
 dr.set_flag(dr.JitFlag.Debug, True)
+#dr.set_flag(dr.ADFlag.AllowNoGrad, True)
 
 # Before importing own code!
 mi.set_variant("llvm_ad_rgb")
@@ -55,7 +56,7 @@ from pss_integrator import Pss
 
 pss = Pss()
 
-scene = mi.load_file("scene.xml")
+scene = mi.load_file("scenes/veach-ajar/scene.xml")
 img = pss.render(scene, scene.sensors()[0])
 
 plt.axis("off")

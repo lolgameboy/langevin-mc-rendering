@@ -24,7 +24,7 @@ fig, ax = plt.subplots()
 
 for i in range(passes):
     # render 1 spp at a time
-    img_pass = mi.render(scene, sensor=sensor, spp=spp_per_pass, seed=i)
+    img_pass = mi.render(scene, sensor=sensor, spp=spp_per_pass, seed=i, integrator='path')
     img_np = np.array(img_pass)
 
     if accum is None:
