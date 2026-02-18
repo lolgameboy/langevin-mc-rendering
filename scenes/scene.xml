@@ -1,9 +1,9 @@
 <scene version="3.0.0">
-	<default name="spp" value="50" />
-	<default name="resy" value="1024" />
-	<default name="resx" value="1024" />
+	<default name="spp" value="100" />
+	<default name="resy" value="512" />
+	<default name="resx" value="512" />
 	<sensor type="perspective">
-		<float name="fov" value="38" />
+		<float name="fov" value="19.5" />
 		<transform name="to_world">
 			<matrix value="-1 0 0 0 0 1 0 1 0 0 -1 6.8 0 0 0 1" />
 		</transform>
@@ -15,46 +15,47 @@
 			<integer name="height" value="$resy" />
 			<string name="file_format" value="openexr" />
 			<string name="pixel_format" value="rgb" />
+			<rfilter type="tent" />
 		</film>
 	</sensor>
 	<bsdf type="twosided" id="LeftWallBSDF">
-		<bsdf type="diffuse">
-			<rgb name="reflectance" value="0.63, 0.065, 0.05" />
+		<bsdf type="conductor">
+    		<string name="material" value="Au"/>
 		</bsdf>
 	</bsdf>
 	<bsdf type="twosided" id="RightWallBSDF">
-		<bsdf type="diffuse">
-			<rgb name="reflectance" value="0.14, 0.45, 0.091" />
+		<bsdf type="conductor">
+    		<string name="material" value="Au"/>
 		</bsdf>
 	</bsdf>
 	<bsdf type="twosided" id="FloorBSDF">
-		<bsdf type="diffuse">
-			<rgb name="reflectance" value="0.725, 0.71, 0.68" />
+		<bsdf type="conductor">
+    		<string name="material" value="Au"/>
 		</bsdf>
 	</bsdf>
 	<bsdf type="twosided" id="CeilingBSDF">
-		<bsdf type="diffuse">
-			<rgb name="reflectance" value="0.725, 0.71, 0.68" />
+		<bsdf type="conductor">
+    		<string name="material" value="Au"/>
 		</bsdf>
 	</bsdf>
 	<bsdf type="twosided" id="BackWallBSDF">
-		<bsdf type="diffuse">
-			<rgb name="reflectance" value="0.725, 0.71, 0.68" />
+		<bsdf type="conductor">
+    		<string name="material" value="Au"/>
 		</bsdf>
 	</bsdf>
 	<bsdf type="twosided" id="ShortBoxBSDF">
-		<bsdf type="diffuse">
-			<rgb name="reflectance" value="0.725, 0.71, 0.68" />
+		<bsdf type="conductor">
+    		<string name="material" value="Au"/>
 		</bsdf>
 	</bsdf>
 	<bsdf type="twosided" id="TallBoxBSDF">
-		<bsdf type="diffuse">
-			<rgb name="reflectance" value="0.725, 0.71, 0.68" />
+		<bsdf type="conductor">
+    		<string name="material" value="Au"/>
 		</bsdf>
 	</bsdf>
 	<bsdf type="twosided" id="LightBSDF">
-		<bsdf type="diffuse">
-			<rgb name="reflectance" value="0, 0, 0" />
+		<bsdf type="conductor">
+    		<string name="material" value="Au"/>
 		</bsdf>
 	</bsdf>
 	<shape type="rectangle" id="Floor">

@@ -3,6 +3,7 @@ import mitsuba as mi
 
 from pss_sampler import PssSampler
 
+# prbi = mi.ad.integrators.prb_basic.BasicPRBIntegrator()
 class Pss(mi.Integrator):
     def __init__(self):
         pass
@@ -23,8 +24,8 @@ class Pss(mi.Integrator):
 
         # Instantiate a path tracer object
         integrator = mi.load_dict({
-            'type': 'prb',
-            'max_depth': 8
+            'type': 'prb_basic',
+            'max_depth': 8,
         })
 
         sample_size = 30
@@ -32,16 +33,35 @@ class Pss(mi.Integrator):
         # Determine size of "physical" image plane from fov parameter
         # x_fov is a lie (or I am retarded somewhere else in my code)
         y_fov = mi.traverse(sensor)["x_fov"]
-        plane_height = dr.tan(dr.deg2rad(y_fov / 2))
+        plane_height = dr.tan(dr.deg2rad(y_fov)) # Originally divided y_fov by 2, but turns out it is already halved in spec?
         plane_size = mi.Vector2f(plane_height * resolution.x / resolution.y, plane_height)
+
+        # Preprocessing step: calculate total integrand of image
+        # TODO Maybe can make this faster by using a proper integrator and summing the final image
+        N = mi.Int(10000)
+        i = mi.Int(0)
+        integrand = mi.Float(0)
+        while i < N:
+            sample = rng.random(mi.ArrayXf, (sample_size,1))
+            luminance, _, _, _ = calculate_sample_contribution(sample, scene, integrator, cam_transform, plane_size, resolution)
+            integrand += luminance / N
+            i += 1
+        image = mi.render(scene, spp=10, integrator=mi.load_dict({'type':'path', 'max_depth':8}))
+        sum = dr.sum(image, axis=None) / (resolution.x * resolution.y)
+
 
         # Initial sample
         sample = dr.full(mi.ArrayXf, 0.5, (sample_size,1))
-        #dr.enable_grad(sample)
-        luminance, res, pixel_x, pixel_y = calculate_sample_contribution(sample, scene, integrator, cam_transform, plane_size, resolution)
-        #dr.backward(luminance)
-        #print(sample.grad)
-        image_block.put(mi.Point2f(pixel_x, pixel_y), res / luminance)
+        grad = dr.full(mi.ArrayXf, 0.5, (sample_size, 1))
+
+        for k in range(sample_size):
+            dr.enable_grad(sample[k])
+            luminance, res, pixel_x, pixel_y = calculate_sample_contribution(sample, scene, integrator, cam_transform, plane_size, resolution)
+            dr.forward(sample[k])
+            grad[k] = dr.grad(luminance)
+            dr.disable_grad(sample[k])
+        dr.print(dr.sum(grad))
+        image_block.put(mi.Point2f(pixel_x, pixel_y), res / luminance * integrand)
 
         N = mi.Int(10000000)
         i = mi.Int(0)
@@ -61,8 +81,13 @@ class Pss(mi.Integrator):
                     prop_sample[j] -= 1
 
             # Calculate proposal luminance
+            #for k in range(len(prop_sample)):
+                #dr.enable_grad(prop_sample[k])
             prop_luminance, prop_res, prop_pixel_x, prop_pixel_y = calculate_sample_contribution(prop_sample, scene, integrator, cam_transform, plane_size, resolution)
-            
+                #dr.forward(prop_sample[k])
+                #grad[k] = dr.grad(prop_luminance)
+                #dr.disable_grad(prop_sample[k])
+            #dr.print(dr.sum(grad))
             # Calculate acceptance chance            
             a = dr.min(1, prop_luminance / luminance)
 
@@ -75,7 +100,8 @@ class Pss(mi.Integrator):
             # Then it intuitively counts pixel visits to determine luminance distribution over the whole image
             # BUT! We use RGB channels. Thus, we must keep track of how this luminance is "divided" amongst the different colors.
             # So instead of counting "1" to the pixel, we count the fractions of colors, and they average to 1.
-            image_block.put(mi.Point2f(pixel_x, pixel_y), res / luminance)
+            # Also multiply with total integrand because MLT gives *proportional* distribution
+            image_block.put(mi.Point2f(pixel_x, pixel_y), res / luminance * integrand)
             i += 1
         
         # We have now simply counted all samples per bucket. 
@@ -83,7 +109,7 @@ class Pss(mi.Integrator):
         # We must devide by sample count and multiply by buckets (reasoning: 1D uniform integral, 2 buckets, 10 samples)
         # The / 2 is arbitrary. This determines overall brightness of image. 
         # TODO: the / 2 (or even / 5) shows that a lot of samples are taken on the light itself
-        return image_block.tensor() / N * resolution.x * resolution.y * 3
+        return image_block.tensor() / N * resolution.x * resolution.y
     
 def calculate_sample_contribution(sample, scene, integrator, cam_transform, plane_size, resolution):
     pss_sampler = PssSampler(sample)
@@ -105,18 +131,27 @@ def calculate_sample_contribution(sample, scene, integrator, cam_transform, plan
 
     # Sample this ray with a differentiable integrator
 
-    # Launch the Monte Carlo sampling process in primal mode (TODO What is primal mode? What are these params?)
+    # TEMP Test
+    # pathtracer = mi.load_dict({
+    #     'type': 'path',
+    #     'max_depth': 8,
+    # })
+
+    # diffray = mi.RayDifferential3f(ray)
+    # res = pathtracer.sample(scene, pss_sampler, diffray)[0]
+    # dr.print(res)
+
+    # Launch the Monte Carlo sampling process in Backward mode (TODO What are these params?)
     res, _, _, _ = integrator.sample(
-        mode=dr.ADMode.Primal,
-        scene=scene,
-        sampler=pss_sampler,
-        ray=ray,
-        depth=mi.UInt32(8),
-        δL=None,
-        δaovs=None,
-        state_in=None,
-        active=mi.Bool(True)
+       mode=dr.ADMode.Forward,
+       scene=scene,
+       sampler=pss_sampler,
+       ray=ray,
+       active=mi.Bool(True),
+       δL=1,
+       state_in=1
     )
+    # TODO What value is res? Look at docs of sample method
 
     luminance = dr.sum(res) / 3 # TODO This is where luminance weights come in, now I use equal weights
 
