@@ -28,7 +28,7 @@ class Pss(mi.Integrator):
             'max_depth': 8,
         })
 
-        sample_size = 50
+        sample_size = 30
         
         # Determine size of "physical" image plane from fov parameter
         # x_fov is a lie (or I am retarded somewhere else in my code)
@@ -43,7 +43,7 @@ class Pss(mi.Integrator):
         integrand = mi.Float(0)
         while i < N:
             sample = rng.random(mi.ArrayXf, (sample_size,1))
-            luminance, _, _, _ = calculate_sample_contribution(sample, scene, cam_transform, plane_size, resolution, rng)
+            luminance, _, _, _ = calculate_sample_contribution(sample, scene, integrator, cam_transform, plane_size, resolution)
             integrand += luminance / N
             i += 1
         image = mi.render(scene, spp=10, integrator=mi.load_dict({'type':'path', 'max_depth':8}))
@@ -51,20 +51,14 @@ class Pss(mi.Integrator):
 
 
         # Initial sample
-        #sample = dr.full(mi.ArrayXf, 0.5, (sample_size,1))
-        sample = rng.random(mi.ArrayXf, (sample_size,1))
-        #sample[8] += 0.1
-        #sample += dr.full(mi.ArrayXf, 0.001, (sample_size,1))
+        sample = dr.full(mi.ArrayXf, 0.5, (sample_size,1))
         #grad = dr.full(mi.ArrayXf, 0.5, (sample_size, 1))
 
-        dr.enable_grad(sample)
-        luminance, res, pixel_x, pixel_y = calculate_sample_contribution(sample, scene, cam_transform, plane_size, resolution, rng)
-        dr.backward(luminance, dr.ADFlag.AllowNoGrad)
-        dr.print(luminance)
-        dr.print(dr.grad(sample)[23])
-        dr.print(dr.grad(sample)[24])
-        dr.print(dr.grad(sample)[25])
-        dr.print(dr.grad(sample)[26])
+        #dr.enable_grad(sample)
+        #luminance, res, pixel_x, pixel_y = calculate_sample_contribution(sample, scene, integrator, cam_transform, plane_size, resolution)
+        #dr.backward(luminance)
+        #grad = dr.grad(sample)
+        #dr.print(grad)
         
         image_block.put(mi.Point2f(pixel_x, pixel_y), res / luminance * integrand)
 
@@ -86,12 +80,13 @@ class Pss(mi.Integrator):
                     prop_sample[j] -= 1
 
             # Calculate proposal luminance
-            dr.enable_grad(prop_sample)
-            with dr.resume_grad():
-                prop_luminance, prop_res, prop_pixel_x, prop_pixel_y = calculate_sample_contribution(prop_sample, scene, cam_transform, plane_size, resolution, rng)
-            dr.backward(prop_luminance, dr.ADFlag.AllowNoGrad)
-            #dr.print(dr.grad(prop_sample))
-
+            #for k in range(len(prop_sample)):
+                #dr.enable_grad(prop_sample[k])
+            prop_luminance, prop_res, prop_pixel_x, prop_pixel_y = calculate_sample_contribution(prop_sample, scene, integrator, cam_transform, plane_size, resolution)
+                #dr.forward(prop_sample[k])
+                #grad[k] = dr.grad(prop_luminance)
+                #dr.disable_grad(prop_sample[k])
+            #dr.print(dr.sum(grad))
             # Calculate acceptance chance            
             a = dr.min(1, prop_luminance / luminance)
 
@@ -107,7 +102,7 @@ class Pss(mi.Integrator):
             # Also multiply with total integrand because MLT gives *proportional* distribution
             image_block.put(mi.Point2f(pixel_x, pixel_y), res / luminance * integrand)
             i += 1
-
+        
         # We have now simply counted all samples per bucket. 
         # Now we must appropriately devide the whole image to get a proper distribution that integrates to 1
         # We must devide by sample count and multiply by buckets (reasoning: 1D uniform integral, 2 buckets, 10 samples)
@@ -115,10 +110,9 @@ class Pss(mi.Integrator):
         # TODO: the / 2 (or even / 5) shows that a lot of samples are taken on the light itself
         return image_block.tensor() / N * resolution.x * resolution.y
     
-
-
-def calculate_sample_contribution(sample, scene, cam_transform, plane_size, resolution, rng, max_depth = 6):
+def calculate_sample_contribution(sample, scene, integrator, cam_transform, plane_size, resolution):
     pss_sampler = PssSampler(sample)
+
     # Sample an initial ray through the image plane
     ray_origin_local = mi.Vector3f(0, 0, 0)
     rand_x = pss_sampler.next_1d()
@@ -132,65 +126,19 @@ def calculate_sample_contribution(sample, scene, cam_transform, plane_size, reso
     pixel_y = mi.Float(rand_y * resolution.y)
 
     ray = mi.Ray3f(o=cam_transform.translation() + ray_origin_local, d=cam_transform.transform_affine(ray_direction_local))
+    # diffray = mi.RayDifferential3f(ray)
 
-    active = mi.Bool(True)
-    throughput = 1 # TODO What this?
-    L = mi.Spectrum(0.0)
+    # Sample this ray with a differentiable integrator
 
-    # ------------------------------------------------------------------
-    # Path tracing loop (fixed depth)
-    # ------------------------------------------------------------------
-    for depth in range(max_depth):
-        si = scene.ray_intersect(ray, active)
+    # TEMP Test
+    pathtracer = mi.load_dict({
+        'type': 'path',
+        'max_depth': 8,
+    })
 
-        # Add emission
-        emitter = si.emitter(scene)
-        L += throughput * emitter.eval(si, active)
+    diffray = mi.RayDifferential3f(ray)
+    res = pathtracer.sample(scene, pss_sampler, diffray)[0]
 
-        # Add light ray
-        # TODO light ray active checks
-        ds, weight = scene.sample_emitter_direction(si, pss_sampler.next_2d())
-        L += throughput * weight
-        # TODO Correct monte carlo weight etc
+    luminance = dr.sum(res) / 3 # TODO This is where luminance weights come in, now I use equal weights
 
-        # Stop if no hit
-        active &= si.is_valid()
-
-        # TODO Doesnt work because active is symbolic or something
-        #if not active:
-        #    print("No hit!")
-        #    break
-
-        # BSDF sampling
-        bsdf = si.bsdf()
-
-        ctx = mi.BSDFContext()
-
-        u_bsdf = pss_sampler.next_2d()
-        u_component = pss_sampler.next_1d()
-
-        bsdf_sample, bsdf_weight = bsdf.sample(
-            ctx,
-            si,
-            u_component,
-            u_bsdf,
-            active
-        )
-
-        throughput *= bsdf_weight
-
-        # Spawn next ray
-        ray = si.spawn_ray(si.to_world(bsdf_sample.wo))
-
-        # Russian roulette
-        rr_prob = 0.95
-
-        rr_sample = rng.random(mi.Float, (1))
-        survive = rr_sample < rr_prob
-        throughput /= rr_prob
-
-        active &= survive
-
-    luminance = dr.sum(L) / 3 # TODO This is where luminance weights come in, now I use equal weights
-
-    return luminance, L, pixel_x, pixel_y
+    return luminance, res, pixel_x, pixel_y

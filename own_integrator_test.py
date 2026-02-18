@@ -3,10 +3,13 @@ import drjit as dr
 
 mi.set_variant("llvm_ad_rgb")
 
-def render_lmc(scene,
+def eval_pss_sample(scene,
                primary_samples,   # dr.Float, shape = (N,)
                max_depth=4):
     """
+    Takes a PSS sample (array of uniform numbers), turns it into a path, 
+    and evaluates the radiance along that path.
+
     primary_samples:
         1D differentiable array containing PSS numbers
     """
@@ -30,7 +33,7 @@ def render_lmc(scene,
     crop_size = film.crop_size()
  
     ray_origin_local = mi.Vector3f(0, 0, 0)
-    ray_direction_local = mi.Vector3f(next_1d() * 10, next_1d() * 10, 1)
+    ray_direction_local = dr.normalize(mi.Vector3f(next_1d(), next_1d(), 1))
     cam_transform = scene.sensors()[0].m_to_world
 
     # Also determine affected pixel already
@@ -39,35 +42,17 @@ def render_lmc(scene,
     L = mi.Spectrum(0.0)
 
     active = mi.Bool(True)
-
+    test = 0
     # ------------------------------------------------------------------
     # Path tracing loop (fixed depth)
     # ------------------------------------------------------------------
     for depth in range(max_depth):
-        # Test
-        if False:
-            si = scene.ray_intersect(ray)
-
-            bsdf = si.bsdf()
-            ctx = mi.BSDFContext()
-        
-            u_test1 = rng.random(mi.Float, (1))
-            u_test2 = rng.random(mi.Float, (2))
-            dr.enable_grad(u_test1)
-            dr.enable_grad(u_test2)
-            with dr.resume_grad():
-                sample, weight = bsdf.sample(ctx, si, u_test1, u_test2)
-            #print(sample.wo)
-            dr.backward(weight, flags=dr.ADFlag.Default | dr.ADFlag.AllowNoGrad)
-            #dr.backward(sample.wo, flags=dr.ADFlag.Default | dr.ADFlag.AllowNoGrad)
-            #print(dr.grad(u_test1))
-            print(dr.grad(u_test2))
-        
         si = scene.ray_intersect(ray, active)
 
         # Add emission
         emitter = si.emitter(scene)
         L += throughput * emitter.eval(si, active)
+        test += emitter.eval(si, active)
 
         # Stop if no hit
         active &= si.is_valid()
@@ -110,8 +95,8 @@ def render_lmc(scene,
         throughput /= rr_prob
 
         active &= survive
-    print(ray.o)
-    return ray.d
+
+    print(test)
     return L
 
 
@@ -123,11 +108,11 @@ u = dr.zeros(mi.Float, dim)
 rng = dr.rng(seed=mi.UInt32(0))
 u = rng.random(mi.ArrayXf, (dim,1))
 
-scene = mi.load_file("scenes/scene.xml")
+scene = mi.load_file("scenes/scene_all_emitters.xml")
 
 dr.enable_grad(u)
 with dr.resume_grad():
-    L = render_lmc(scene, u, 8)
+    L = eval_pss_sample(scene, u, 8)
 
 dr.backward(L)
 print(L)
