@@ -35,8 +35,8 @@ pathtracer = mi.load_dict({
 
 # Sample this ray
 res = pathtracer.sample(scene, pss_sampler, diffray)
-print(res)
-print(res[0])
+#print(res)
+#print(res[0])
 
 
 # Used for testing if my own path tracer is correct
@@ -69,7 +69,7 @@ def render_mc(scene: mi.Scene, sensor: mi.Sensor, seed: mi.UInt = 0, spp: int = 
         plane_size = mi.Vector2f(plane_height * resolution.x / resolution.y, plane_height)
 
         # TODO Maybe can make this faster by using a proper integrator and summing the final image
-        N = mi.Int(10000000)
+        N = mi.Int(1000000)
         i = mi.Int(0)
 
         while i < N:
@@ -95,8 +95,8 @@ def render_mc(scene: mi.Scene, sensor: mi.Sensor, seed: mi.UInt = 0, spp: int = 
 
 pss = Pss()
 
-#img = pss.render(scene, scene.sensors()[0])
-img = render_mc(scene, scene.sensors()[0])
+img = pss.render(scene, scene.sensors()[0])
+#img = render_mc(scene, scene.sensors()[0])
 # img = mi.render(scene, integrator=pathtracer, spp=20)
 
 plt.axis("off")

@@ -13,7 +13,13 @@ class Pss(mi.Integrator):
         film = sensor.film()
         resolution = film.crop_size()
 
-        image_block = mi.ImageBlock(
+        luminance_block = mi.ImageBlock(
+            resolution,
+            mi.ScalarPoint2i(0,0),
+            1
+        )
+
+        color_block = mi.ImageBlock(
             resolution,
             mi.ScalarPoint2i(0,0),
             3
@@ -38,7 +44,7 @@ class Pss(mi.Integrator):
 
         # Preprocessing step: calculate total integrand of image
         # TODO Maybe can make this faster by using a proper integrator and summing the final image
-        N = mi.Int(10000)
+        N = mi.Int(50000)
         i = mi.Int(0)
         integrand = mi.Float(0)
         while i < N:
@@ -53,18 +59,19 @@ class Pss(mi.Integrator):
         # Initial sample
         #sample = dr.full(mi.ArrayXf, 0.5, (sample_size,1))
         sample = rng.random(mi.ArrayXf, (sample_size,1))
-        sample[30] += 1
+        #sample[30] += 1
         #sample += dr.full(mi.ArrayXf, 0.001, (sample_size,1))
         #grad = dr.full(mi.ArrayXf, 0.5, (sample_size, 1))
 
-        dr.enable_grad(sample)
+        #dr.enable_grad(sample)
         luminance, res, pixel_x, pixel_y = calculate_sample_contribution(sample, scene, cam_transform, plane_size, resolution, rng)
-        dr.backward(luminance, dr.ADFlag.AllowNoGrad)
-        dr.print(luminance)
+        #dr.backward(luminance, dr.ADFlag.AllowNoGrad)
+        #dr.print(luminance)
         
-        image_block.put(mi.Point2f(pixel_x, pixel_y), res / luminance * integrand)
+        luminance_block.put(mi.Point2f(pixel_x, pixel_y), [luminance])
+        color_block.put(mi.Point2f(pixel_x, pixel_y), res)
 
-        N = mi.Int(1000000)
+        N = mi.Int(10000000)
         i = mi.Int(0)
 
         while i < N:
@@ -82,10 +89,10 @@ class Pss(mi.Integrator):
                     prop_sample[j] -= 1
 
             # Calculate proposal luminance
-            dr.enable_grad(prop_sample)
-            with dr.resume_grad():
-                prop_luminance, prop_res, prop_pixel_x, prop_pixel_y = calculate_sample_contribution(prop_sample, scene, cam_transform, plane_size, resolution, rng)
-            dr.backward(prop_luminance, dr.ADFlag.AllowNoGrad)
+            #dr.enable_grad(prop_sample)
+            #with dr.resume_grad():
+            prop_luminance, prop_res, prop_pixel_x, prop_pixel_y = calculate_sample_contribution(prop_sample, scene, cam_transform, plane_size, resolution, rng)
+            #dr.backward(prop_luminance, dr.ADFlag.AllowNoGrad)
             #dr.print(dr.grad(prop_sample))
 
             # Calculate acceptance chance            
@@ -102,13 +109,15 @@ class Pss(mi.Integrator):
             # So instead of counting "1" to the pixel, we count the fractions of colors, and they average to 1.
             # Also multiply with total integrand because MLT gives *proportional* distribution
             # Update: on second inspection this still seems correct, although it might be better to 
-            # let the fractions of color *sum* to 1 instead of average to 1 TODO
+            # let the fractions of color *sum* to 1 instead of average to 1 
             # I think this is connected to the total brightness, and it might influence the total brightness factor by 3
             # or possibly not i guess. check this.
             # Hmm, or maybe my reasoning here is completely flawed from the start, because (255, 0, 0) and (255, 255, 0)
             # can be equally bright but are simply different colors. Is that how it works?
-            # or is light red more like 255 200 200? TODO
-            image_block.put(mi.Point2f(pixel_x, pixel_y), res / luminance * integrand)
+            # or is light red more like 255 200 200? 
+            # ALRIGHT: New strategy: 
+            luminance_block.put(mi.Point2f(pixel_x, pixel_y), [luminance])
+            color_block.put(mi.Point2f(pixel_x, pixel_y), res)
             i += 1
 
         # We have now simply counted all samples per bucket. 
@@ -116,7 +125,13 @@ class Pss(mi.Integrator):
         # We must devide by sample count and multiply by buckets (reasoning: 1D uniform integral, 2 buckets, 10 samples)
         # The / 2 is arbitrary. This determines overall brightness of image. 
         # TODO: the / 2 (or even / 5) shows that a lot of samples are taken on the light itself
-        return image_block.tensor() / N * resolution.x * resolution.y
+        luminance_tensor = luminance_block.tensor() / N * resolution.x * resolution.y
+        # Rescale colors to correct luminance
+        weight_tensor = dr.reshape(dr.max(color_block.tensor(), -1), (resolution.x, resolution.y, 1))
+        # Mask pixels with 0 samples to result in black (0)
+        result = dr.select(luminance_tensor != 0, luminance_tensor / weight_tensor, 0)
+        # COOL TO KNOW: Just returning luminance tensor gives nice sample count map. Could be useful to illustrate in thesis?
+        return color_block.tensor() * result
 
 
 # Essentially the path tracing function
@@ -221,7 +236,7 @@ def calculate_sample_contribution(sample, scene, cam_transform, plane_size, reso
 
         active &= survive
 
-    luminance = dr.sum(L)# / 3 # TODO This is where luminance weights come in, now I use equal weights
+    luminance = dr.max(L) # TODO Luminance weights 
     return luminance, L, pixel_x, pixel_y
 
 
