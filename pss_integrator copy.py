@@ -1,7 +1,7 @@
 import drjit as dr
 import mitsuba as mi
 
-from pss_sampler import PssSampler
+from scripts.pss_sampler import PssSampler
 
 # prbi = mi.ad.integrators.prb_basic.BasicPRBIntegrator()
 class Pss(mi.Integrator):

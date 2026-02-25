@@ -1,43 +1,21 @@
+from pathlib import Path
 import drjit as dr
 import mitsuba as mi
 
-dr.set_flag(dr.JitFlag.Debug, True)
-#dr.set_flag(dr.ADFlag.AllowNoGrad, True)
+from trace_path import calculate_sample_contribution
 
-# Before importing own code!
-mi.set_variant("llvm_ad_rgb")
+# Calculates the log of the gaussian pdf of a multivariate. log to avoid underflow
+# Checked, is correct (for diagonal SIGMA case!)
+def log_gaussian_diag(x, mu, var):
+    # x, mu, var are same-shaped Dr.Jit arrays
+    k = len(x)
 
-import matplotlib.pyplot as plt
-from pss_integrator import Pss
-from pss_integrator import calculate_sample_contribution, calculate_sample_contribution_ref
+    diff = x - mu
 
+    log_det = dr.sum(dr.log(var))
+    quad = dr.sum((diff * diff) / var)
 
-
-
-from pss_sampler import PssSampler
-scene = mi.load_file("scenes/scene.xml")
-sample = [0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5]
-
-pss_sampler = PssSampler(sample)
-ray_origin_local = mi.Vector3f(0, 0, 0)
-ray_direction_local = mi.Vector3f(0, 0, 1)
-cam_transform = scene.sensors()[0].m_to_world
-# Also determine affected pixel already
-ray = mi.Ray3f(o=cam_transform.transform_affine(ray_origin_local), d=cam_transform.transform_affine(ray_direction_local))
-diffray = mi.RayDifferential3f(ray)
-
-
-pathtracer = mi.load_dict({
-    'type': 'path',
-    'max_depth': 8,
-})
-
-
-# Sample this ray
-res = pathtracer.sample(scene, pss_sampler, diffray)
-#print(res)
-#print(res[0])
-
+    return -0.5 * (k * dr.log(2.0 * dr.pi) + log_det + quad)
 
 # Used for testing if my own path tracer is correct
 @dr.syntax
@@ -68,8 +46,7 @@ def render_mc(scene: mi.Scene, sensor: mi.Sensor, seed: mi.UInt = 0, spp: int = 
         plane_height = dr.tan(dr.deg2rad(y_fov)) # Originally divided y_fov by 2, but turns out it is already halved in spec?
         plane_size = mi.Vector2f(plane_height * resolution.x / resolution.y, plane_height)
 
-        # TODO Maybe can make this faster by using a proper integrator and summing the final image
-        N = mi.Int(1000000)
+        N = mi.Int(3000000)
         i = mi.Int(0)
 
         while i < N:
@@ -85,22 +62,34 @@ def render_mc(scene: mi.Scene, sensor: mi.Sensor, seed: mi.UInt = 0, spp: int = 
             i += 1
         
         image = image_block.tensor() / sample_counts_block.tensor()
-        #refimage = mi.render(scene, spp=100, integrator=mi.load_dict({'type':'path', 'max_depth':8}))
-        #rmse = dr.sqrt(dr.mean(dr.square(refimage - image)))
-        #dr.print(rmse)
-        #return refimage
         return image
 
+def render_ref(scene, spp=100, max_depth=-1):
+    refimage = mi.render(scene, spp=spp, integrator=mi.load_dict({'type':'path', 'rr_depth':5, 'max_depth':max_depth}))
+    return refimage
 
-
-pss = Pss()
-
-img = pss.render(scene, scene.sensors()[0])
-#img = render_mc(scene, scene.sensors()[0])
-# img = mi.render(scene, integrator=pathtracer, spp=20)
-
-plt.axis("off")
-plt.imshow(img ** (1.0 / 2.2)); # approximate sRGB tonemapping TODO why this needed?
-
-plt.show()
-
+def render_convergence(scene, rmsediff_max, use_cached=True):
+    converged = False
+    i = 1
+    prevImage = render_ref(scene, 1)
+    while not converged:
+        pathStr = f'cache/ref_{2**i}.exr'
+        path = Path(pathStr)
+        if path.exists() and use_cached:
+            bmp = mi.Bitmap(pathStr)
+            image = mi.TensorXf(bmp)
+        else:
+            image = render_ref(scene, 2**i)
+            mi.Bitmap(image).write(pathStr)
+            # TEMP: also save as png for viewing pleasure
+            mi.Bitmap(image).convert(
+                component_format=mi.Struct.Type.UInt8,
+                srgb_gamma=True
+            ).write(f'cache/ref_{2**i}.png')
+        rmsediff = dr.sqrt(dr.mean(dr.square(prevImage - image)))
+        print(f'i:{i}, spp:{2**i}, rmsediff:{rmsediff}')
+        if rmsediff < rmsediff_max:
+            converged = True
+        i += 1
+        prevImage = image
+    return image
