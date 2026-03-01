@@ -5,12 +5,12 @@ from pss_sampler import PssSampler
 from trace_path import calculate_sample_contribution
 from utils import log_gaussian_diag
 
-class Pss(mi.Integrator):
+class LMC(mi.Integrator):
     def __init__(self):
         pass
     
     @dr.syntax
-    def render(self, scene: mi.Scene, sensor: mi.Sensor, seed: mi.UInt = 0, spp: int = 0, develop: bool = True, evaluate: bool = True) -> mi.TensorXf:
+    def render(self, scene: mi.Scene, sensor: mi.Sensor, total_samples, pss = False, seed: mi.UInt = 0, spp: int = 0, develop: bool = True, evaluate: bool = True) -> mi.TensorXf:
         film = sensor.film()
         resolution = film.crop_size()
 
@@ -34,7 +34,7 @@ class Pss(mi.Integrator):
         # Determine size of "physical" image plane from fov parameter
         # x_fov is a lie (or I am retarded somewhere else in my code)
         y_fov = mi.traverse(sensor)["x_fov"]
-        plane_height = dr.tan(dr.deg2rad(y_fov)) # Originally divided y_fov by 2, but turns out it is already halved in spec?
+        plane_height = 2 * dr.tan(dr.deg2rad(y_fov / 2))
         plane_size = mi.Vector2f(plane_height * resolution.x / resolution.y, plane_height)
 
         # Preprocessing step: calculate total integrand of image
@@ -57,16 +57,13 @@ class Pss(mi.Integrator):
         luminance_block.put(mi.Point2f(pixel_x, pixel_y), [luminance])
         color_block.put(mi.Point2f(pixel_x, pixel_y), res)
 
-        N = mi.Int(30000000)
+        N = mi.Int(total_samples)
         i = mi.Int(0)
 
         avgaccept = mi.Float(0)
 
         while i < N:
             # Generate proposal mutation
-            # pss:
-            #mutation = rng.normal(mi.ArrayXf, (sample_size,1), scale=0.1)
-            # LMC:
             # Large or small step mutation?
             large_mut_chance = 0.1
             stepsize = 0.01
@@ -75,6 +72,11 @@ class Pss(mi.Integrator):
             else:
                 w = rng.normal(mi.ArrayXf, (sample_size,1), scale=dr.sqrt(stepsize))
                 mutation = 0.5 * stepsize * gradlog + w
+                prop_sample = sample + mutation
+
+            # For PSS:
+            if pss:
+                mutation = rng.normal(mi.ArrayXf, (sample_size,1), scale=0.1)
                 prop_sample = sample + mutation
 
             # Boundary conditions: loop around
@@ -97,6 +99,11 @@ class Pss(mi.Integrator):
                         - dr.log(luminance) \
                         - log_gaussian_diag(prop_sample, sample + 0.5 * stepsize * gradlog, covar)
             a = dr.exp(dr.minimum(0.0, log_alpha))
+            # For PSS:
+            if pss:
+                a = dr.minimum(1, prop_luminance / luminance)
+
+
             avgaccept += a
 
             if rng.uniform(mi.Float, 1) < a:
@@ -124,7 +131,7 @@ class Pss(mi.Integrator):
             luminance_block.put(mi.Point2f(pixel_x, pixel_y), [luminance])
             color_block.put(mi.Point2f(pixel_x, pixel_y), res / (luminance) * integrand)
             i += 1
-        dr.print(avgaccept/N)
+        dr.print(f'Average acceptance rate: {avgaccept/N}')
         # We have now simply counted all samples per bucket. 
         # Now we must appropriately devide the whole image to get a proper distribution that integrates to 1
         # We must devide by sample count and multiply by buckets (reasoning: 1D uniform integral, 2 buckets, 10 samples)

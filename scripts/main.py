@@ -1,3 +1,4 @@
+from pathlib import Path
 import drjit as dr
 import mitsuba as mi
 
@@ -8,14 +9,16 @@ dr.set_flag(dr.JitFlag.Debug, True)
 mi.set_variant("llvm_ad_rgb")
 
 import matplotlib.pyplot as plt
-from pss_integrator import Pss
+from lmc_integrator import LMC
 from trace_path import calculate_sample_contribution, calculate_sample_contribution_ref
-from utils import render_ref, render_convergence
-
-
-
+from utils import render_ref, render_convergence, render_mc
 from pss_sampler import PssSampler
+
 scene = mi.load_file("../scenes/scene.xml")
+scene_name = "cornell_box"
+
+
+
 sample = [0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5]
 
 pss_sampler = PssSampler(sample)
@@ -38,12 +41,45 @@ res = pathtracer.sample(scene, pss_sampler, diffray)
 #print(res)
 #print(res[0])
 
-pss = Pss()
+def render_scene(method, scene, N, use_cached = True):
+    if method == "pss":
+        pathStr = f'cache/{scene_name}/pss_{N}.exr'
+        pngPathStr = f'cache/{scene_name}/pss_{N}.png'
+        def render_function():
+            lmc = LMC()
+            return lmc.render(scene, scene.sensors()[0], N, True)
 
-#img = pss.render(scene, scene.sensors()[0])
-#img = render_mc(scene, scene.sensors()[0])
+    if method == "mc":
+        pathStr = f'cache/{scene_name}/mc_{N}.exr'
+        pngPathStr = f'cache/{scene_name}/mc_{N}.png'
+        def render_function():
+            return render_mc(scene, scene.sensors()[0], N, True)
+    
+    path = Path(pathStr)
+    if path.exists() and use_cached:
+        bmp = mi.Bitmap(pathStr)
+        image = mi.TensorXf(bmp)
+    else:
+        image = render_function()
+        mi.Bitmap(image).write(pathStr)
+        # TEMP: also save as png for viewing pleasure
+        mi.Bitmap(image).convert(
+            component_format=mi.Struct.Type.UInt8,
+            srgb_gamma=True
+        ).write(pngPathStr)
+
+    ref_image = render_convergence(scene, scene_name, 0.003, True)
+    rmse = dr.sqrt(dr.mean(dr.square(ref_image - image)))
+    print(f'{method}:\nN:{N}, rmse:{rmse}')
+    diffimg = dr.abs(ref_image - image)
+    return diffimg
+
+
+# img = render_mc(scene, scene.sensors()[0], 500000)
 # img = mi.render(scene, integrator=pathtracer, spp=20)
-img = render_convergence(scene, 0.001)
+# img = render_convergence(scene, 0.0001)
+img = render_scene("pss", scene, 1000 * 1000000, True)
+
 plt.axis("off")
 plt.imshow(img ** (1.0 / 2.2)); # approximate sRGB tonemapping TODO why this needed?
 

@@ -105,11 +105,10 @@ def calculate_sample_contribution(sample, scene, cam_transform, plane_size, reso
         throughput /= rr_prob
 
         active &= survive
-    luminance = mi.luminance(L) # mitsuba has luminance function???? Nice!!
+
+    luminance = mi.luminance(L) # TODO This is where luminance weights come in
     return luminance, L, pixel_x, pixel_y
-
-
-
+        
 
 def calculate_sample_contribution_ref(sample, scene, cam_transform, plane_size, resolution, rng, max_depth = 6):
     '''
@@ -132,10 +131,23 @@ def calculate_sample_contribution_ref(sample, scene, cam_transform, plane_size, 
     pixel_x = mi.Float(rand_x * resolution.x)
     pixel_y = mi.Float(rand_y * resolution.y)
 
+    # WORKING code to calc ray using built-in code. For now appears the same,
+    # not sure if there are any differences? Shouldn't be, i think?
+    #pixel = mi.Point2f(pixel_x, pixel_y)
+    #film_size = mi.Point2f(512, 512)
+
+    #ray, ray_weight = scene.sensors()[0].sample_ray_differential(
+    #    time=0,
+    #    sample1=0,
+    #    sample2=pixel / film_size,
+    #    sample3=mi.Point2f(0.5, 0.5)
+    #)
+
     ray = mi.Ray3f(o=cam_transform.translation() + ray_origin_local, d=cam_transform.transform_affine(ray_direction_local))
     diffray = mi.RayDifferential3f(ray)
 
     integrator=mi.load_dict({'type':'path', 'max_depth':8})
     res = integrator.sample(scene, pss_sampler, diffray)
-    luminance = dr.sum(res[0]) / 3 # TODO This is where luminance weights come in, now I use equal weights
-    return luminance, res[0], pixel_x, pixel_y
+    result = dr.select(res[1] == True, res[0], 0)
+    luminance = mi.luminance(result) # TODO This is where luminance weights come in
+    return luminance, result, pixel_x, pixel_y
