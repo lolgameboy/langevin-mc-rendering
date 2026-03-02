@@ -7,9 +7,8 @@ from trace_path import calculate_sample_contribution, calculate_sample_contribut
 # Calculates the log of the gaussian pdf of a multivariate. log to avoid underflow
 # Checked, is correct (for diagonal SIGMA case!)
 def log_gaussian_diag(x, mu, var):
+    k = x.shape[0]
     # x, mu, var are same-shaped Dr.Jit arrays
-    k = len(x)
-
     diff = x - mu
 
     log_det = dr.sum(dr.log(var))

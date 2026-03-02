@@ -96,17 +96,19 @@ def calculate_sample_contribution(sample, scene, cam_transform, plane_size, reso
         # Spawn next ray
         ray = si.spawn_ray(si.to_world(bsdf_sample.wo))
 
+        # TODO TEMP Disabled
         # Russian roulette
-        rr_prob = 0.99
+        #rr_prob = 1
         # TODO I think this isn't correct for pss because f(x) is now not a correct function of x (the sample) because it 
         # does not deterministically depend on x
-        rr_sample = rng.random(mi.Float, (1))
-        survive = rr_sample < rr_prob
-        throughput /= rr_prob
+        #rr_sample = rng.random(mi.Float, (1))
+        #survive = rr_sample < rr_prob
+        #throughput /= rr_prob
 
-        active &= survive
+        #active &= survive
 
     luminance = mi.luminance(L) # TODO This is where luminance weights come in
+    # luminance = dr.sum(L) / 3
     return luminance, L, pixel_x, pixel_y
         
 

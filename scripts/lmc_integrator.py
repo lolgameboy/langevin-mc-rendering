@@ -38,7 +38,7 @@ class LMC(mi.Integrator):
         plane_size = mi.Vector2f(plane_height * resolution.x / resolution.y, plane_height)
 
         # Preprocessing step: calculate total integrand of image
-        N = mi.Int(50000)
+        N = mi.Int(100000)
         i = mi.Int(0)
         integrand = mi.Float(0)
         while i < N:
@@ -51,7 +51,7 @@ class LMC(mi.Integrator):
 
         dr.enable_grad(sample)
         luminance, res, pixel_x, pixel_y = calculate_sample_contribution(sample, scene, cam_transform, plane_size, resolution, rng)
-        dr.backward(dr.log(luminance), dr.ADFlag.AllowNoGrad)
+        dr.backward(dr.log(dr.maximum(luminance, 1e-8)), dr.ADFlag.AllowNoGrad)
         gradlog = dr.grad(sample)
         
         luminance_block.put(mi.Point2f(pixel_x, pixel_y), [luminance])
@@ -66,8 +66,14 @@ class LMC(mi.Integrator):
             # Generate proposal mutation
             # Large or small step mutation?
             large_mut_chance = 0.1
+            # TODO When large mutation is rejected, should I attempt another large mut or just any mut specifically?
+            # TODO Optionally can disable gradient comp when taking large step for performance, if I want
+            # NVM, need that gradient for next mutation
+            
             stepsize = 0.01
-            if rng.random(mi.Float, (1)) < large_mut_chance:
+
+            large_mut = rng.random(mi.Float, (1)) < large_mut_chance
+            if large_mut:
                 prop_sample = rng.random(mi.ArrayXf, (sample_size, 1))
             else:
                 w = rng.normal(mi.ArrayXf, (sample_size,1), scale=dr.sqrt(stepsize))
@@ -79,29 +85,32 @@ class LMC(mi.Integrator):
                 mutation = rng.normal(mi.ArrayXf, (sample_size,1), scale=0.1)
                 prop_sample = sample + mutation
 
-            # Boundary conditions: loop around
-            for j in range(len(prop_sample)):
-                if prop_sample[j] < 0:
-                    prop_sample[j] += 1
-                if prop_sample[j] > 1:
-                    prop_sample[j] -= 1
+            # M-H chain lives in R^n, but sample evaluation happens in unit cube.
+            # This is to fix acceptance chance incorrectness when wrapping chain.
+            # prop_sample_eval is passed to the path tracer but prop_sample is used in acceptance etc
+            prop_sample_eval = prop_sample - dr.floor(prop_sample)
 
             # Calculate proposal luminance
-            dr.enable_grad(prop_sample)
-            prop_luminance, prop_res, prop_pixel_x, prop_pixel_y = calculate_sample_contribution(prop_sample, scene, cam_transform, plane_size, resolution, rng)
-            dr.backward(dr.log(prop_luminance), dr.ADFlag.AllowNoGrad)
+            dr.enable_grad(prop_sample_eval)
+            prop_luminance, prop_res, prop_pixel_x, prop_pixel_y = calculate_sample_contribution(prop_sample_eval, scene, cam_transform, plane_size, resolution, rng)
+            # dr.backward(dr.log(dr.maximum(prop_luminance, 1e-8)), dr.ADFlag.AllowNoGrad)
+            dr.backward(dr.log(prop_luminance + 1e-3), dr.ADFlag.AllowNoGrad)
+            prop_gradlog = dr.grad(prop_sample_eval)
 
             # Calculate acceptance chance  
             # log to avoid underflow
-            covar = dr.full(mi.ArrayXf, stepsize, (sample_size, 1))
-            log_alpha = dr.log(prop_luminance) \
-                        + log_gaussian_diag(sample, prop_sample + 0.5 * stepsize * dr.grad(prop_sample), covar) \
-                        - dr.log(luminance) \
-                        - log_gaussian_diag(prop_sample, sample + 0.5 * stepsize * gradlog, covar)
-            a = dr.exp(dr.minimum(0.0, log_alpha))
-            # For PSS:
-            if pss:
+            if large_mut:
                 a = dr.minimum(1, prop_luminance / luminance)
+            else:
+                covar = dr.full(mi.ArrayXf, stepsize, (sample_size, 1))
+                log_alpha = dr.log(dr.maximum(prop_luminance, 1e-8)) \
+                            + log_gaussian_diag(sample, prop_sample + 0.5 * stepsize * prop_gradlog, covar) \
+                            - dr.log(dr.maximum(luminance, 1e-8)) \
+                            - log_gaussian_diag(prop_sample, sample + 0.5 * stepsize * gradlog, covar)
+                a = dr.exp(dr.minimum(0.0, log_alpha))
+                # For PSS:
+                if pss:
+                    a = dr.minimum(1, prop_luminance / luminance)
 
 
             avgaccept += a
@@ -109,7 +118,7 @@ class LMC(mi.Integrator):
             if rng.uniform(mi.Float, 1) < a:
                 luminance, res, pixel_x, pixel_y = prop_luminance, prop_res, prop_pixel_x, prop_pixel_y
                 sample = prop_sample
-                gradlog = dr.grad(prop_sample)
+                gradlog = prop_gradlog
 
             # Explanation: PSSMLT actually uses luminance (combination of RGB values) to explore domain 
             # (because it only takes a scalar output) to mutate the sample)

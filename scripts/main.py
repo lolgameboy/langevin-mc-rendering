@@ -42,6 +42,13 @@ res = pathtracer.sample(scene, pss_sampler, diffray)
 #print(res[0])
 
 def render_scene(method, scene, N, use_cached = True):
+    if method == "lmc":
+        pathStr = f'cache/{scene_name}/lmc_{N}.exr'
+        pngPathStr = f'cache/{scene_name}/lmc_{N}.png'
+        def render_function():
+            lmc = LMC()
+            return lmc.render(scene, scene.sensors()[0], N, False)
+
     if method == "pss":
         pathStr = f'cache/{scene_name}/pss_{N}.exr'
         pngPathStr = f'cache/{scene_name}/pss_{N}.png'
@@ -78,7 +85,7 @@ def render_scene(method, scene, N, use_cached = True):
 # img = render_mc(scene, scene.sensors()[0], 500000)
 # img = mi.render(scene, integrator=pathtracer, spp=20)
 # img = render_convergence(scene, 0.0001)
-img = render_scene("pss", scene, 1000 * 1000000, True)
+img = render_scene("pss", scene, 3 * 1000000, False)
 
 plt.axis("off")
 plt.imshow(img ** (1.0 / 2.2)); # approximate sRGB tonemapping TODO why this needed?
