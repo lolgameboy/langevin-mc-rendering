@@ -8,9 +8,26 @@ from utils import log_gaussian_diag
 class LMC(mi.Integrator):
     def __init__(self):
         pass
-    
+    #def render(self, scene: mi.Scene, sensor: mi.Sensor, seed: mi.UInt = 0, spp: int = 0, develop: bool = True, evaluate: bool = True) -> mi.TensorXf:
     @dr.syntax
-    def render(self, scene: mi.Scene, sensor: mi.Sensor, total_samples, pss = False, seed: mi.UInt = 0, spp: int = 0, develop: bool = True, evaluate: bool = True) -> mi.TensorXf:
+    def render(self,
+                scene: mi.Scene,
+                sensor: mi.Sensor,
+                total_samples,
+                integrand_samples = 100000,
+                pss = False,
+                stepsize = 0.01,
+                large_mut_chance = 0.0001,
+                precond = True,
+                beta = 0.999,
+                delta = 0.001,
+                momentum = True,
+                alpha = 0.9,
+                dimin_adapt = True,
+                dimin_adapt_coeff_M = 0.000000001,
+                dimin_adapt_coeff_m = 0.00000001,
+                seed = 0) -> mi.TensorXf:
+        
         film = sensor.film()
         resolution = film.crop_size()
 
@@ -27,7 +44,7 @@ class LMC(mi.Integrator):
         )
 
         cam_transform = sensor.m_to_world
-        rng = dr.rng(seed=mi.UInt32(3))
+        rng = dr.rng(seed=mi.UInt32(seed))
 
         sample_size = 50
         
@@ -38,9 +55,10 @@ class LMC(mi.Integrator):
         plane_size = mi.Vector2f(plane_height * resolution.x / resolution.y, plane_height)
 
         # Preprocessing step: calculate total integrand of image
-        N = mi.Int(100000)
+        N = mi.Int(integrand_samples)
         i = mi.Int(0)
         integrand = mi.Float(0)
+
         while i < N:
             sample = rng.random(mi.ArrayXf, (sample_size,1))
             luminance, _, _, _ = calculate_sample_contribution(sample, scene, cam_transform, plane_size, resolution, rng)
@@ -62,27 +80,50 @@ class LMC(mi.Integrator):
 
         avgaccept = mi.Float(0)
 
+        G = dr.zeros(mi.ArrayXf, (sample_size, 1))
+        M = dr.zeros(mi.ArrayXf, (sample_size, 1))
+
+        d = dr.zeros(mi.ArrayXf, (sample_size, 1))
+        m = dr.zeros(mi.ArrayXf, (sample_size, 1))
+        
         while i < N:
             # Generate proposal mutation
             # Large or small step mutation?
-            large_mut_chance = 0.1
-            # TODO When large mutation is rejected, should I attempt another large mut or just any mut specifically?
-            # TODO Optionally can disable gradient comp when taking large step for performance, if I want
-            # NVM, need that gradient for next mutation
-            
-            stepsize = 0.01
 
+            # TODO When large mutation is rejected, should I attempt another large mut or just any mut specifically?
+            # TODO Good value? Should this depend on sample count?? Is this only important for convergence as
+            # small bias for low sample count is not important??? Because outshadowed by error?
+            diminAdaptCoeffM = mi.Float(dimin_adapt_coeff_M)
+            diminAdaptCoeffm = mi.Float(dimin_adapt_coeff_m)
+            if not dimin_adapt:
+                diminAdaptCoeffM = mi.Float(0)
+                diminAdaptCoeffm = mi.Float(0)
+            # TODO What to do with M on large mutation? Reset? Keep? Check paper or do experiments?
             large_mut = rng.random(mi.Float, (1)) < large_mut_chance
             if large_mut:
                 prop_sample = rng.random(mi.ArrayXf, (sample_size, 1))
             else:
+                # Calculate preconditioning matrix (diagonal!)
+                if precond:
+                    adapt_coeff = dr.power(mi.Float(i+1), -diminAdaptCoeffM)
+                    G = beta * G + (1 - beta) * (gradlog * gradlog)
+                    M = 1 / (delta * dr.identity(mi.ArrayXf, (sample_size, 1)) + adapt_coeff * dr.sqrt(G))
+                else:
+                    M = dr.ones(mi.ArrayXf, (sample_size, 1))
+                # Calculate momentum
+                if momentum:
+                    adapt_coeff = dr.power(mi.Float(i+1), -diminAdaptCoeffm)
+                    d = alpha * d + (1 - alpha) * gradlog
+                    m = gradlog + adapt_coeff * d
+                else:
+                    m = gradlog
                 w = rng.normal(mi.ArrayXf, (sample_size,1), scale=dr.sqrt(stepsize))
-                mutation = 0.5 * stepsize * gradlog + w
+                mutation = 0.5 * stepsize * M * m + dr.sqrt(M)*w
                 prop_sample = sample + mutation
 
             # For PSS:
             if pss:
-                mutation = rng.normal(mi.ArrayXf, (sample_size,1), scale=0.1)
+                mutation = rng.normal(mi.ArrayXf, (sample_size,1), scale=stepsize)
                 prop_sample = sample + mutation
 
             # M-H chain lives in R^n, but sample evaluation happens in unit cube.
@@ -94,7 +135,9 @@ class LMC(mi.Integrator):
             dr.enable_grad(prop_sample_eval)
             prop_luminance, prop_res, prop_pixel_x, prop_pixel_y = calculate_sample_contribution(prop_sample_eval, scene, cam_transform, plane_size, resolution, rng)
             # dr.backward(dr.log(dr.maximum(prop_luminance, 1e-8)), dr.ADFlag.AllowNoGrad)
-            dr.backward(dr.log(prop_luminance + 1e-3), dr.ADFlag.AllowNoGrad)
+            # TODO Experiment: dr.log(prop_luminance + 1e-3) seems to perform slightly better than 
+            # dr.log(dr.maximum(prop_luminance, 1e-8))
+            dr.backward(dr.log(dr.maximum(prop_luminance, 1e-8)), dr.ADFlag.AllowNoGrad)
             prop_gradlog = dr.grad(prop_sample_eval)
 
             # Calculate acceptance chance  
@@ -103,15 +146,18 @@ class LMC(mi.Integrator):
                 a = dr.minimum(1, prop_luminance / luminance)
             else:
                 covar = dr.full(mi.ArrayXf, stepsize, (sample_size, 1))
+                # TODO acceptance chance formula for adaptation? Does it matter much? It is wrong anyway because not
+                # time-homogeneous, and so because of diminishing adaptation M and m influence will vanish anyway
+                # But there probably is a "best approximation". What is this? 
+                # Currently extract d comp (actual momentum factor) from m for reverse probability and add prop_gradlog instead of gradlog
                 log_alpha = dr.log(dr.maximum(prop_luminance, 1e-8)) \
-                            + log_gaussian_diag(sample, prop_sample + 0.5 * stepsize * prop_gradlog, covar) \
+                            + log_gaussian_diag(sample, prop_sample + 0.5 * stepsize * M * (prop_gradlog + m - gradlog), covar * M) \
                             - dr.log(dr.maximum(luminance, 1e-8)) \
-                            - log_gaussian_diag(prop_sample, sample + 0.5 * stepsize * gradlog, covar)
+                            - log_gaussian_diag(prop_sample, sample + 0.5 * stepsize * M * m, covar * M)
                 a = dr.exp(dr.minimum(0.0, log_alpha))
                 # For PSS:
                 if pss:
                     a = dr.minimum(1, prop_luminance / luminance)
-
 
             avgaccept += a
 

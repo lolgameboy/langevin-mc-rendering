@@ -41,17 +41,46 @@ res = pathtracer.sample(scene, pss_sampler, diffray)
 #print(res)
 #print(res[0])
 
-def render_scene(method, scene, N, use_cached = True):
+def render_scene(method, scene, N, use_cached = True, integrand_samples = 100000,
+                stepsize = 0.01,
+                large_mut_chance = 0.0001,
+                precond = True,
+                beta = 0.999,
+                delta = 0.001,
+                momentum = True,
+                alpha = 0.9,
+                dimin_adapt = True,
+                dimin_adapt_coeff_M = 0.000000001,
+                dimin_adapt_coeff_m = 0.00000001,
+                seed = 0):
     if method == "lmc":
-        pathStr = f'cache/{scene_name}/lmc_{N}.exr'
-        pngPathStr = f'cache/{scene_name}/lmc_{N}.png'
+        fileName = f'lmc_{N}_{integrand_samples}_{stepsize}_{large_mut_chance}'
+        if precond:
+            fileName += f'_pre_{beta}_{delta}'
+        if momentum:
+            fileName += f'_mom_{alpha}'
+        if dimin_adapt and (precond or momentum):
+            fileName += f'_da'
+            if precond:
+                fileName += f'_{dimin_adapt_coeff_M}'
+            if momentum:
+                fileName += f'_{dimin_adapt_coeff_m}'
+
+        pathStr = f'cache/{scene_name}/{fileName}.exr'
+        pngPathStr = f'cache/{scene_name}/{fileName}.png'
         def render_function():
             lmc = LMC()
-            return lmc.render(scene, scene.sensors()[0], N, False)
+            return lmc.render(scene, scene.sensors()[0], N, integrand_samples, False, 
+                              stepsize, large_mut_chance, 
+                              precond, beta, delta, 
+                              momentum, alpha, 
+                              dimin_adapt, dimin_adapt_coeff_M, dimin_adapt_coeff_m, 
+                              seed)
 
     if method == "pss":
-        pathStr = f'cache/{scene_name}/pss_{N}.exr'
-        pngPathStr = f'cache/{scene_name}/pss_{N}.png'
+        fileName = f'pss_{N}_{integrand_samples}_{stepsize}_{large_mut_chance}'
+        pathStr = f'cache/{scene_name}/{fileName}.exr'
+        pngPathStr = f'cache/{scene_name}/{fileName}.png'
         def render_function():
             lmc = LMC()
             return lmc.render(scene, scene.sensors()[0], N, True)
@@ -85,7 +114,15 @@ def render_scene(method, scene, N, use_cached = True):
 # img = render_mc(scene, scene.sensors()[0], 500000)
 # img = mi.render(scene, integrator=pathtracer, spp=20)
 # img = render_convergence(scene, 0.0001)
-img = render_scene("pss", scene, 3 * 1000000, False)
+# img = render_scene("lmc", scene, N=10 * 1000000, use_cached=True, integrand_samples=100000,
+#                 stepsize=0.01, large_mut_chance=0.001, 
+#                 precond=True, beta=0.999, delta=0.001, 
+#                 momentum=False, alpha=0.99,
+#                 dimin_adapt=False, dimin_adapt_coeff_M=1e-9, dimin_adapt_coeff_m=1e-8,
+#                 seed=0)
+
+img = render_scene("pss", scene, N=10 * 1000000, use_cached=True, integrand_samples=100000,
+                 stepsize=0.1, large_mut_chance=0.1)
 
 plt.axis("off")
 plt.imshow(img ** (1.0 / 2.2)); # approximate sRGB tonemapping TODO why this needed?
