@@ -37,10 +37,9 @@ def render_mc(scene: mi.Scene, sensor: mi.Sensor, N : mi.Int, seed: mi.UInt = 0,
         sample_size = 50
         
         # Determine size of "physical" image plane from fov parameter
-        # x_fov is a lie (or I am retarded somewhere else in my code)
-        y_fov = mi.traverse(sensor)["x_fov"]
-        plane_height = 2 * dr.tan(dr.deg2rad(y_fov / 2))
-        plane_size = mi.Vector2f(plane_height * resolution.x / resolution.y, plane_height)
+        x_fov = mi.traverse(sensor)["x_fov"]
+        plane_width = 2 * dr.tan(dr.deg2rad(x_fov / 2))
+        plane_size = mi.Vector2f(plane_width, plane_width * resolution.y / resolution.x)
 
         i = mi.Int(0)
 
@@ -61,7 +60,28 @@ def render_mc(scene: mi.Scene, sensor: mi.Sensor, N : mi.Int, seed: mi.UInt = 0,
         return film.develop()
 
 def render_ref(scene, spp=100, max_depth=-1):
-    refimage = mi.render(scene, spp=spp, integrator=mi.load_dict({'type':'path', 'rr_depth':5, 'max_depth':max_depth}))
+    total_spp = spp
+    batch_size = 8192
+    integrator = mi.load_dict({'type':'path', 'rr_depth':5, 'max_depth':max_depth})
+    seed = 0
+    if total_spp > batch_size:
+        print(f'rendering multi-pass: {total_spp} spp in batches of {batch_size} spp')
+        print(f'spp remaining: {total_spp}')
+        refimage = mi.render(scene, spp=batch_size, integrator=integrator, seed=seed) * (batch_size / total_spp)
+        spp -= batch_size
+        seed += 1
+        while spp > 0:
+            print(f'spp remaining: {spp}')
+            if spp >= batch_size:
+                refimage += mi.render(scene, spp=batch_size, integrator=integrator, seed=seed) * (batch_size / total_spp)
+                spp -= batch_size
+                seed += 1
+            else:
+                refimage += mi.render(scene, spp=spp, integrator=integrator, seed=seed) * (spp / total_spp)
+                spp -= spp
+                seed += 1
+    else:
+        refimage = mi.render(scene, spp=total_spp, integrator=integrator, seed=seed)
     return refimage
 
 def render_convergence(scene, scene_name, rmsediff_max, use_cached=True):

@@ -49,10 +49,9 @@ class LMC(mi.Integrator):
         sample_size = 50
         
         # Determine size of "physical" image plane from fov parameter
-        # x_fov is a lie (or I am retarded somewhere else in my code)
-        y_fov = mi.traverse(sensor)["x_fov"]
-        plane_height = 2 * dr.tan(dr.deg2rad(y_fov / 2))
-        plane_size = mi.Vector2f(plane_height * resolution.x / resolution.y, plane_height)
+        x_fov = mi.traverse(sensor)["x_fov"]
+        plane_width = 2 * dr.tan(dr.deg2rad(x_fov / 2))
+        plane_size = mi.Vector2f(plane_width, plane_width * resolution.y / resolution.x)
 
         # Preprocessing step: calculate total integrand of image
         N = mi.Int(integrand_samples)
@@ -80,9 +79,11 @@ class LMC(mi.Integrator):
 
         avgaccept = mi.Float(0)
 
-        G = dr.zeros(mi.ArrayXf, (sample_size, 1))
-        M = dr.zeros(mi.ArrayXf, (sample_size, 1))
+        prev_G = dr.ones(mi.ArrayXf, (sample_size, 1))
+        G = dr.ones(mi.ArrayXf, (sample_size, 1))
+        M = dr.ones(mi.ArrayXf, (sample_size, 1))
 
+        prev_d = dr.zeros(mi.ArrayXf, (sample_size, 1))
         d = dr.zeros(mi.ArrayXf, (sample_size, 1))
         m = dr.zeros(mi.ArrayXf, (sample_size, 1))
         
@@ -106,14 +107,14 @@ class LMC(mi.Integrator):
                 # Calculate preconditioning matrix (diagonal!)
                 if precond:
                     adapt_coeff = dr.power(mi.Float(i+1), -diminAdaptCoeffM)
-                    G = beta * G + (1 - beta) * (gradlog * gradlog)
+                    G = beta * prev_G + (1 - beta) * (gradlog * gradlog)
                     M = 1 / (delta * dr.identity(mi.ArrayXf, (sample_size, 1)) + adapt_coeff * dr.sqrt(G))
                 else:
                     M = dr.ones(mi.ArrayXf, (sample_size, 1))
                 # Calculate momentum
                 if momentum:
                     adapt_coeff = dr.power(mi.Float(i+1), -diminAdaptCoeffm)
-                    d = alpha * d + (1 - alpha) * gradlog
+                    d = alpha * prev_d + (1 - alpha) * gradlog
                     m = gradlog + adapt_coeff * d
                 else:
                     m = gradlog
@@ -121,28 +122,50 @@ class LMC(mi.Integrator):
                 mutation = 0.5 * stepsize * M * m + dr.sqrt(M)*w
                 prop_sample = sample + mutation
 
-            # For PSS:
-            if pss:
-                mutation = rng.normal(mi.ArrayXf, (sample_size,1), scale=stepsize)
-                prop_sample = sample + mutation
+                # For PSS:
+                if pss:
+                    mutation = rng.normal(mi.ArrayXf, (sample_size,1), scale=stepsize)
+                    prop_sample = sample + mutation
 
             # M-H chain lives in R^n, but sample evaluation happens in unit cube.
             # This is to fix acceptance chance incorrectness when wrapping chain.
             # prop_sample_eval is passed to the path tracer but prop_sample is used in acceptance etc
+            #prop_sample = prop_sample - dr.floor(prop_sample)
+            #dr.enable_grad(prop_sample)
             prop_sample_eval = prop_sample - dr.floor(prop_sample)
-
-            # Calculate proposal luminance
             dr.enable_grad(prop_sample_eval)
+            # Calculate proposal luminance
             prop_luminance, prop_res, prop_pixel_x, prop_pixel_y = calculate_sample_contribution(prop_sample_eval, scene, cam_transform, plane_size, resolution, rng)
             # dr.backward(dr.log(dr.maximum(prop_luminance, 1e-8)), dr.ADFlag.AllowNoGrad)
             # TODO Experiment: dr.log(prop_luminance + 1e-3) seems to perform slightly better than 
             # dr.log(dr.maximum(prop_luminance, 1e-8))
             dr.backward(dr.log(dr.maximum(prop_luminance, 1e-8)), dr.ADFlag.AllowNoGrad)
             prop_gradlog = dr.grad(prop_sample_eval)
+            # Truncated gradients
+            prop_gradlog = dr.minimum(prop_gradlog, 100)
+
+            # calculate proposal preconditioning
+            if precond:
+                adapt_coeff = dr.power(mi.Float(i+1), -diminAdaptCoeffM)
+                G_prop = beta * prev_G + (1 - beta) * (prop_gradlog * prop_gradlog)
+                M_prop = 1 / (delta * dr.identity(mi.ArrayXf, (sample_size, 1)) + adapt_coeff * dr.sqrt(G_prop))
+            else:
+                M_prop = dr.ones(mi.ArrayXf, (sample_size, 1))
+
+            # calculate proposal momentum
+            if momentum:
+                adapt_coeff = dr.power(mi.Float(i+1), -diminAdaptCoeffm)
+
+                d_prop = alpha * prev_d + (1 - alpha) * prop_gradlog
+                m_prop = prop_gradlog + adapt_coeff * d_prop
+            else:
+                m_prop = prop_gradlog
+
 
             # Calculate acceptance chance  
             # log to avoid underflow
             if large_mut:
+                #a = mi.Float(1)
                 a = dr.minimum(1, prop_luminance / luminance)
             else:
                 covar = dr.full(mi.ArrayXf, stepsize, (sample_size, 1))
@@ -151,20 +174,29 @@ class LMC(mi.Integrator):
                 # But there probably is a "best approximation". What is this? 
                 # Currently extract d comp (actual momentum factor) from m for reverse probability and add prop_gradlog instead of gradlog
                 log_alpha = dr.log(dr.maximum(prop_luminance, 1e-8)) \
-                            + log_gaussian_diag(sample, prop_sample + 0.5 * stepsize * M * (prop_gradlog + m - gradlog), covar * M) \
+                            + log_gaussian_diag(sample, prop_sample + 0.5 * stepsize * M_prop * m_prop, covar * M_prop) \
                             - dr.log(dr.maximum(luminance, 1e-8)) \
                             - log_gaussian_diag(prop_sample, sample + 0.5 * stepsize * M * m, covar * M)
                 a = dr.exp(dr.minimum(0.0, log_alpha))
                 # For PSS:
                 if pss:
                     a = dr.minimum(1, prop_luminance / luminance)
-
             avgaccept += a
+
+            color_block.put(mi.Point2f(pixel_x, pixel_y), (1-a) * res / (luminance))
+            color_block.put(mi.Point2f(prop_pixel_x, prop_pixel_y), a * prop_res / (prop_luminance))
 
             if rng.uniform(mi.Float, 1) < a:
                 luminance, res, pixel_x, pixel_y = prop_luminance, prop_res, prop_pixel_x, prop_pixel_y
                 sample = prop_sample
                 gradlog = prop_gradlog
+                prev_d = d
+                prev_G = G
+                # TODO Experiment two options: reset and low global step chance, or 
+                # no reset and higher global step chance
+                #if large_mut:
+                    #prev_G = dr.ones(mi.ArrayXf, (sample_size, 1))
+                    #prev_d = dr.zeros(mi.ArrayXf, (sample_size, 1))
 
             # Explanation: PSSMLT actually uses luminance (combination of RGB values) to explore domain 
             # (because it only takes a scalar output) to mutate the sample)
@@ -183,19 +215,21 @@ class LMC(mi.Integrator):
             # Add color with correct "luminance weight" to other colors 
             # (rn just adding is fine because lum = max rgb so weigt is correct automatically)
             # Then at the end you have correct *relative* rgb values. So just rescale to correct luminance
-            luminance_block.put(mi.Point2f(pixel_x, pixel_y), [luminance])
-            color_block.put(mi.Point2f(pixel_x, pixel_y), res / (luminance) * integrand)
+            
+            # splatting to block now done for both tentative and current sample, weighted (above)
+            #luminance_block.put(mi.Point2f(pixel_x, pixel_y), [luminance])
+            #color_block.put(mi.Point2f(pixel_x, pixel_y), res / (luminance))
             i += 1
-        dr.print(f'Average acceptance rate: {avgaccept/N}')
         # We have now simply counted all samples per bucket. 
         # Now we must appropriately devide the whole image to get a proper distribution that integrates to 1
         # We must devide by sample count and multiply by buckets (reasoning: 1D uniform integral, 2 buckets, 10 samples)
         luminance_tensor = luminance_block.tensor() / N * resolution.x * resolution.y
 
         # Rescale colors to correct luminance
-        weight_tensor = dr.reshape(dr.max(color_block.tensor(), -1), (resolution.x, resolution.y, 1))
+        weight_tensor = dr.reshape(dr.max(color_block.tensor(), -1), (resolution.y, resolution.x, 1))
         # Mask pixels with 0 samples to result in black (0)
         result = dr.select(luminance_tensor != 0, luminance_tensor / weight_tensor, 0)
         # COOL TO KNOW: Just returning luminance tensor gives nice sample count map. Could be useful to illustrate in thesis?
         #return color_block.tensor() * result
-        return color_block.tensor() / N * resolution.x * resolution.y #TEMP
+        #TEMP
+        return color_block.tensor() / N * resolution.x * resolution.y * integrand, avgaccept[0] / N
