@@ -148,7 +148,7 @@ def calculate_sample_contribution_ref(sample, scene, cam_transform, plane_size, 
     ray = mi.Ray3f(o=cam_transform.translation() + ray_origin_local, d=cam_transform.transform_affine(ray_direction_local))
     diffray = mi.RayDifferential3f(ray)
 
-    integrator=mi.load_dict({'type':'path', 'max_depth':8})
+    integrator=mi.load_dict({'type':'path', 'max_depth':max_depth})
     res = integrator.sample(scene, pss_sampler, diffray)
     result = dr.select(res[1] == True, res[0], 0)
     luminance = mi.luminance(result) # TODO This is where luminance weights come in

@@ -61,7 +61,7 @@ def render_mc(scene: mi.Scene, sensor: mi.Sensor, N : mi.Int, seed: mi.UInt = 0,
 
 def render_ref(scene, spp=100, max_depth=-1):
     total_spp = spp
-    batch_size = 8192
+    batch_size = 2048
     integrator = mi.load_dict({'type':'path', 'rr_depth':5, 'max_depth':max_depth})
     seed = 0
     if total_spp > batch_size:

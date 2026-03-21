@@ -38,10 +38,34 @@ def render_scene(method, scene, scene_name, ref_rmsediff,
                 fileName += f'_{dimin_adapt_coeff_M}'
             if momentum:
                 fileName += f'_{dimin_adapt_coeff_m}'
+    
 
         def render_function():
             lmc = LMC()
             return lmc.render(scene, scene.sensors()[0], N, integrand_samples, False, 
+                              stepsize, large_mut_chance, 
+                              precond, beta, delta, 
+                              momentum, alpha, 
+                              dimin_adapt, dimin_adapt_coeff_M, dimin_adapt_coeff_m, 
+                              seed)
+    
+    if method == "lmc_ref":
+        fileName = f'lmc_ref_{N}_{integrand_samples}_{stepsize}_{large_mut_chance}'
+        if precond:
+            fileName += f'_pre_{beta}_{delta}'
+        if momentum:
+            fileName += f'_mom_{alpha}'
+        if dimin_adapt and (precond or momentum):
+            fileName += f'_da'
+            if precond:
+                fileName += f'_{dimin_adapt_coeff_M}'
+            if momentum:
+                fileName += f'_{dimin_adapt_coeff_m}'
+    
+
+        def render_function():
+            lmc = LMC()
+            return lmc.render_ref(scene, scene.sensors()[0], N, integrand_samples, False, 
                               stepsize, large_mut_chance, 
                               precond, beta, delta, 
                               momentum, alpha, 
@@ -67,7 +91,7 @@ def render_scene(method, scene, scene_name, ref_rmsediff,
         bmp = mi.Bitmap(pathStr)
         image = mi.TensorXf(bmp)
         with open(acceptRatioPathStr, "r") as f:
-            acceptratio = float(f.read())
+            acceptratio = f.read()
     else:
         image, acceptratio = render_function()
         mi.Bitmap(image).write(pathStr)
@@ -159,6 +183,8 @@ def plot_convergence(methods, scene, scene_name, ref_rmsediff,
 #scene_name = "cornell_box"
 scene = mi.load_file("../scenes/veach-ajar/scene.xml")
 scene_name = "veach_door"
+#scene = mi.load_file("../scenes/veach-bidir/scene.xml")
+#scene_name = "veach_egg"
 
 # plot_convergence(["mc", "lmc"], scene, scene_name, 0.5, use_cached=True,               
 #                 l_samples = [1, 3, 10, 30, 100, 300, 1000],# , 3000, 10000],
@@ -178,8 +204,9 @@ scene_name = "veach_door"
 # img = render_mc(scene, scene.sensors()[0], 500000)
 # img = mi.render(scene, integrator=pathtracer, spp=20)
 # img = render_convergence(scene, 0.0001)
-img, rmse, acceptratio, diffimg = render_scene("pss", scene, N=5 * 1000000, scene_name=scene_name, ref_rmsediff=0.5, use_cached=False, integrand_samples=100000,
-                stepsize=0.005, large_mut_chance=0.05, 
+img, rmse, acceptratio, diffimg = render_scene("lmc_ref", scene, N=10 * 1000000, scene_name=scene_name, 
+                ref_rmsediff=1, use_cached=False, integrand_samples=300000,
+                stepsize=0.001, large_mut_chance=0.02, 
                 precond=True, beta=0.999, delta=0.001, 
                 momentum=False, alpha=0.9,
                 dimin_adapt=False, dimin_adapt_coeff_M=1e-9, dimin_adapt_coeff_m=1e-8,
@@ -192,5 +219,7 @@ img, rmse, acceptratio, diffimg = render_scene("pss", scene, N=5 * 1000000, scen
 plt.axis("off")
 plt.imshow(img ** (1.0 / 2.2)); # approximate sRGB tonemapping TODO why this needed?
 
+plt.figure()
+plt.imshow(diffimg ** (1/2.2))
 plt.show()
 
