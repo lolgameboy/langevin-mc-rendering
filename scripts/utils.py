@@ -46,7 +46,7 @@ def render_mc(scene: mi.Scene, sensor: mi.Sensor, N : mi.Int, seed: mi.UInt = 0,
         while i < N:
             sample = rng.random(mi.ArrayXf, (sample_size,1))
 
-            luminance, res, pixel_x, pixel_y = calculate_sample_contribution(sample, scene, cam_transform, plane_size, resolution, rng)
+            luminance, res, pixel_x, pixel_y = calculate_sample_contribution(sample, scene, cam_transform, plane_size, resolution)
         
             value = dr.zeros(mi.ArrayXf, (image_block.channel_count(), 1))
             value[0] = res[0]
@@ -92,11 +92,15 @@ def render_convergence(scene, scene_name, rmsediff_max, use_cached=True):
         pathStr = f'cache/{scene_name}/ref_{2**i}.exr'
         path = Path(pathStr)
         if path.exists() and use_cached:
-            bmp = mi.Bitmap(pathStr)
+            bmp = mi.Bitmap(pathStr).convert(
+                component_format=mi.Struct.Type.Float64
+            )
             image = mi.TensorXf(bmp)
         else:
             image = render_ref(scene, 2**i)
-            mi.Bitmap(image).write(pathStr)
+            mi.Bitmap(image).convert(
+                component_format=mi.Struct.Type.Float32
+            ).write(pathStr)
             # TEMP: also save as png for viewing pleasure
             mi.Bitmap(image).convert(
                 component_format=mi.Struct.Type.UInt8,

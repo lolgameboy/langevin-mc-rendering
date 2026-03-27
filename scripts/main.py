@@ -1,3 +1,10 @@
+import sys
+# caution: path[0] is reserved for script path (or '' in REPL)
+# Uncomment this line to use my own mitsuba build
+# (Also, own build requires python 3.12.9 instead of 3.11.9)
+sys.path.insert(1, '../../mitsuba3/build/python')
+
+
 from pathlib import Path
 import drjit as dr
 import mitsuba as mi
@@ -6,7 +13,7 @@ dr.set_flag(dr.JitFlag.Debug, True)
 #dr.set_flag(dr.ADFlag.AllowNoGrad, True)
 
 # Before importing own code!
-mi.set_variant("llvm_ad_rgb")
+mi.set_variant("llvm_ad_rgb_double")
 
 import matplotlib.pyplot as plt
 from lmc_integrator import LMC
@@ -88,13 +95,17 @@ def render_scene(method, scene, scene_name, ref_rmsediff,
     acceptRatioPathStr = f'cache/{scene_name}/{fileName}.acceptratio'
     path = Path(pathStr)
     if path.exists() and use_cached:
-        bmp = mi.Bitmap(pathStr)
+        bmp = mi.Bitmap(pathStr).convert(
+            component_format=mi.Struct.Type.Float64
+        )
         image = mi.TensorXf(bmp)
         with open(acceptRatioPathStr, "r") as f:
             acceptratio = f.read()
     else:
         image, acceptratio = render_function()
-        mi.Bitmap(image).write(pathStr)
+        mi.Bitmap(image).convert(
+            component_format=mi.Struct.Type.Float32
+        ).write(pathStr)
         # TEMP: also save as png for viewing pleasure
         mi.Bitmap(image).convert(
             component_format=mi.Struct.Type.UInt8,
@@ -185,6 +196,8 @@ scene = mi.load_file("../scenes/veach-ajar/scene.xml")
 scene_name = "veach_door"
 #scene = mi.load_file("../scenes/veach-bidir/scene.xml")
 #scene_name = "veach_egg"
+#scene = mi.load_file("../scenes/empty_box.xml")
+#scene_name = "empty_box"
 
 # plot_convergence(["mc", "lmc"], scene, scene_name, 0.5, use_cached=True,               
 #                 l_samples = [1, 3, 10, 30, 100, 300, 1000],# , 3000, 10000],
@@ -204,9 +217,9 @@ scene_name = "veach_door"
 # img = render_mc(scene, scene.sensors()[0], 500000)
 # img = mi.render(scene, integrator=pathtracer, spp=20)
 # img = render_convergence(scene, 0.0001)
-img, rmse, acceptratio, diffimg = render_scene("lmc_ref", scene, N=10 * 1000000, scene_name=scene_name, 
+img, rmse, acceptratio, diffimg = render_scene("lmc", scene, N=1 * 1000000, scene_name=scene_name, 
                 ref_rmsediff=1, use_cached=False, integrand_samples=300000,
-                stepsize=0.001, large_mut_chance=0.02, 
+                stepsize=0.001, large_mut_chance=0.05, 
                 precond=True, beta=0.999, delta=0.001, 
                 momentum=False, alpha=0.9,
                 dimin_adapt=False, dimin_adapt_coeff_M=1e-9, dimin_adapt_coeff_m=1e-8,

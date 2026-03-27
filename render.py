@@ -1,7 +1,7 @@
 import sys
 # caution: path[0] is reserved for script path (or '' in REPL)
 # Only include when I want to use my own mitsuba build
-# sys.path.insert(1, '../mitsuba3/build/python')
+sys.path.insert(1, '../mitsuba3/build/python')
 
 import mitsuba as mi
 import drjit as dr

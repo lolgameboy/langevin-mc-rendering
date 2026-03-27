@@ -5,7 +5,7 @@ from pss_sampler import PssSampler
 
 # Essentially the path tracing function
 @dr.syntax
-def calculate_sample_contribution(sample, scene, cam_transform, plane_size, resolution, rng, max_depth = 6):
+def calculate_sample_contribution(sample, scene, cam_transform, plane_size, resolution, max_depth = 6):
     pss_sampler = PssSampler(sample)
     # Sample an initial ray through the image plane
     ray_origin_local = mi.Vector3f(0, 0, 0)
@@ -112,7 +112,7 @@ def calculate_sample_contribution(sample, scene, cam_transform, plane_size, reso
     return luminance, L, pixel_x, pixel_y
         
 
-def calculate_sample_contribution_ref(sample, scene, cam_transform, plane_size, resolution, rng, max_depth = 6):
+def calculate_sample_contribution_ref(sample, scene, cam_transform, plane_size, resolution, max_depth = 6):
     '''
     Reference method to calculate the ray contribution. Affected pixel is dependent on sample.
     Individual output not neccesarily equal to output of calculate_sample_contribution with same sample, 
@@ -148,7 +148,7 @@ def calculate_sample_contribution_ref(sample, scene, cam_transform, plane_size, 
     ray = mi.Ray3f(o=cam_transform.translation() + ray_origin_local, d=cam_transform.transform_affine(ray_direction_local))
     diffray = mi.RayDifferential3f(ray)
 
-    integrator=mi.load_dict({'type':'path', 'max_depth':max_depth})
+    integrator=mi.load_dict({'type':'path', 'max_depth':max_depth,'rr_depth':max_depth+1})
     res = integrator.sample(scene, pss_sampler, diffray)
     result = dr.select(res[1] == True, res[0], 0)
     luminance = mi.luminance(result) # TODO This is where luminance weights come in

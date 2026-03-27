@@ -60,14 +60,14 @@ class LMC(mi.Integrator):
 
         while i < N:
             sample = rng.random(mi.ArrayXf, (sample_size,1))
-            luminance, _, _, _ = calculate_sample_contribution(sample, scene, cam_transform, plane_size, resolution, rng)
+            luminance, _, _, _ = calculate_sample_contribution(sample, scene, cam_transform, plane_size, resolution)
             integrand += luminance / N
             i += 1
 
         sample = rng.random(mi.ArrayXf, (sample_size,1))
 
         dr.enable_grad(sample)
-        luminance, res, pixel_x, pixel_y = calculate_sample_contribution(sample, scene, cam_transform, plane_size, resolution, rng)
+        luminance, res, pixel_x, pixel_y = calculate_sample_contribution(sample, scene, cam_transform, plane_size, resolution)
         dr.backward(dr.log(dr.maximum(luminance, 1e-8)), dr.ADFlag.AllowNoGrad)
         gradlog = dr.grad(sample)
         
@@ -135,7 +135,7 @@ class LMC(mi.Integrator):
             prop_sample_eval = prop_sample - dr.floor(prop_sample)
             dr.enable_grad(prop_sample_eval)
             # Calculate proposal luminance
-            prop_luminance, prop_res, prop_pixel_x, prop_pixel_y = calculate_sample_contribution(prop_sample_eval, scene, cam_transform, plane_size, resolution, rng)
+            prop_luminance, prop_res, prop_pixel_x, prop_pixel_y = calculate_sample_contribution(prop_sample_eval, scene, cam_transform, plane_size, resolution)
             # dr.backward(dr.log(dr.maximum(prop_luminance, 1e-8)), dr.ADFlag.AllowNoGrad)
             # TODO Experiment: dr.log(prop_luminance + 1e-3) seems to perform slightly better than 
             # dr.log(dr.maximum(prop_luminance, 1e-8))
@@ -315,20 +315,20 @@ class LMC(mi.Integrator):
 
         while i < N:
             sample = rng.random(mi.ArrayXf, (sample_size,1))
-            luminance, _, _, _ = calculate_sample_contribution_ref(sample, scene, cam_transform, plane_size, resolution, rng)
+            luminance, _, _, _ = calculate_sample_contribution_ref(sample, scene, cam_transform, plane_size, resolution)
             integrand += luminance / N
             i += 1
 
         sample = rng.random(mi.ArrayXf, (sample_size,1))
 
-        luminance, res, pixel_x, pixel_y = calculate_sample_contribution_ref(sample, scene, cam_transform, plane_size, resolution, rng)
+        luminance, res, pixel_x, pixel_y = calculate_sample_contribution_ref(sample, scene, cam_transform, plane_size, resolution)
         # Approx gradient
-        eps = 0.000000001
+        eps = 1e-8
         gradlog = dr.zeros(mi.ArrayXf, (sample_size, 1))
         for sam_i in range(sample_size):
             sample[sam_i] += eps
-            lum2, _, _, _ = calculate_sample_contribution_ref(sample, scene, cam_transform, plane_size, resolution, rng)
-            gradlog[sam_i] = (-dr.log(dr.maximum(lum2, 1e-8)) + dr.log(dr.maximum(luminance, 1e-8))) / eps
+            lum2, _, _, _ = calculate_sample_contribution_ref(sample, scene, cam_transform, plane_size, resolution)
+            gradlog[sam_i] = (- dr.log(dr.maximum(lum2, 1e-8)) + dr.log(dr.maximum(luminance, 1e-8))) / eps
             sample[sam_i] -= eps
         
         luminance_block.put(mi.Point2f(pixel_x, pixel_y), [luminance])
@@ -394,11 +394,11 @@ class LMC(mi.Integrator):
             # prop_sample_eval is passed to the path tracer but prop_sample is used in acceptance etc
             prop_sample_eval = prop_sample - dr.floor(prop_sample)
             # Calculate proposal luminance
-            prop_luminance, prop_res, prop_pixel_x, prop_pixel_y = calculate_sample_contribution(prop_sample_eval, scene, cam_transform, plane_size, resolution, rng)
+            prop_luminance, prop_res, prop_pixel_x, prop_pixel_y = calculate_sample_contribution(prop_sample_eval, scene, cam_transform, plane_size, resolution)
             for sam_i in range(sample_size):
                 prop_sample_eval[sam_i] += eps
-                lum2, _, _, _ = calculate_sample_contribution_ref(prop_sample_eval, scene, cam_transform, plane_size, resolution, rng)
-                prop_gradlog[sam_i] = (-dr.log(dr.maximum(lum2, 1e-8)) + dr.log(dr.maximum(prop_luminance, 1e-8))) / eps
+                lum2, _, _, _ = calculate_sample_contribution_ref(prop_sample_eval, scene, cam_transform, plane_size, resolution)
+                prop_gradlog[sam_i] = (- dr.log(dr.maximum(lum2, 1e-8)) + dr.log(dr.maximum(prop_luminance, 1e-8))) / eps
                 prop_sample_eval[sam_i] -= eps
 
             # Truncated gradients
