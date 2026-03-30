@@ -228,7 +228,7 @@
 		<transform name="to_world">
 			<matrix value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1" />
 		</transform>
-		<boolean name="face_normals" value="true" />
+		<boolean name="face_normals" value="true" /> 
 		<ref id="DiffuseBSDF" />
 	</shape>
 	<shape type="obj" id="Table">

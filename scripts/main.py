@@ -190,10 +190,12 @@ def plot_convergence(methods, scene, scene_name, ref_rmsediff,
 
 
 
-#scene = mi.load_file("../scenes/scene.xml")
-#scene_name = "cornell_box"
-scene = mi.load_file("../scenes/veach-ajar/scene.xml")
-scene_name = "veach_door"
+scene = mi.load_file("../scenes/scene.xml")
+scene_name = "cornell_box"
+#scene = mi.load_file("../scenes/scene_metal.xml")
+#scene_name = "cornell_box_metal"
+#scene = mi.load_file("../scenes/veach-ajar/scene.xml")
+#scene_name = "veach_door"
 #scene = mi.load_file("../scenes/veach-bidir/scene.xml")
 #scene_name = "veach_egg"
 #scene = mi.load_file("../scenes/empty_box.xml")
@@ -217,7 +219,7 @@ scene_name = "veach_door"
 # img = render_mc(scene, scene.sensors()[0], 500000)
 # img = mi.render(scene, integrator=pathtracer, spp=20)
 # img = render_convergence(scene, 0.0001)
-img, rmse, acceptratio, diffimg = render_scene("lmc", scene, N=1 * 1000000, scene_name=scene_name, 
+img, rmse, acceptratio, diffimg = render_scene("mc", scene, N=3 * 1000000, scene_name=scene_name, 
                 ref_rmsediff=1, use_cached=False, integrand_samples=300000,
                 stepsize=0.001, large_mut_chance=0.05, 
                 precond=True, beta=0.999, delta=0.001, 
