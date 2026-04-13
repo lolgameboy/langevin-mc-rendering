@@ -2,7 +2,7 @@ from pathlib import Path
 import drjit as dr
 import mitsuba as mi
 
-from trace_path import calculate_sample_contribution, calculate_sample_contribution_ref
+from trace_path import calculate_sample_contribution, calculate_sample_contribution_ref, calculate_sample_contribution_bidir
 
 # Calculates the log of the gaussian pdf of a multivariate. log to avoid underflow
 # Checked, is correct (for diagonal SIGMA case!)
@@ -18,7 +18,7 @@ def log_gaussian_diag(x, mu, var):
 
 # Used for testing if my own path tracer is correct
 @dr.syntax
-def render_mc(scene: mi.Scene, sensor: mi.Sensor, N : mi.Int, seed: mi.UInt = 0, spp: int = 0, develop: bool = True, evaluate: bool = True) -> mi.TensorXf:
+def render_mc(scene: mi.Scene, sensor: mi.Sensor, bdpt, N : mi.Int, seed: mi.UInt = 0, spp: int = 0, develop: bool = True, evaluate: bool = True) -> mi.TensorXf:
         film = sensor.film()
         # I now actually use the film to collect the samples,
         # it is fine like this, but 
@@ -46,8 +46,10 @@ def render_mc(scene: mi.Scene, sensor: mi.Sensor, N : mi.Int, seed: mi.UInt = 0,
         while i < N:
             sample = rng.random(mi.ArrayXf, (sample_size,1))
 
-            luminance, res, pixel_x, pixel_y = calculate_sample_contribution(sample, scene, cam_transform, plane_size, resolution)
-        
+            if not bdpt:
+                luminance, res, pixel_x, pixel_y = calculate_sample_contribution(sample, scene, cam_transform, plane_size, resolution)
+            else:
+                luminance, res, pixel_x, pixel_y = calculate_sample_contribution_bidir(sample, scene, cam_transform, plane_size, resolution)
             value = dr.zeros(mi.ArrayXf, (image_block.channel_count(), 1))
             value[0] = res[0]
             value[1] = res[1]

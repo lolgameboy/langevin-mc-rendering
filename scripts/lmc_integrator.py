@@ -2,7 +2,7 @@ import drjit as dr
 import mitsuba as mi
 
 from pss_sampler import PssSampler
-from trace_path import calculate_sample_contribution, calculate_sample_contribution_ref
+from trace_path import calculate_sample_contribution, calculate_sample_contribution_ref, calculate_sample_contribution_bidir
 from utils import log_gaussian_diag
 
 class LMC(mi.Integrator):
@@ -13,6 +13,7 @@ class LMC(mi.Integrator):
     def render(self,
                 scene: mi.Scene,
                 sensor: mi.Sensor,
+                bdpt,
                 total_samples,
                 integrand_samples = 100000,
                 pss = False,
@@ -60,14 +61,21 @@ class LMC(mi.Integrator):
 
         while i < N:
             sample = rng.random(mi.ArrayXf, (sample_size,1))
-            luminance, _, _, _ = calculate_sample_contribution(sample, scene, cam_transform, plane_size, resolution)
+            if not bdpt:
+                luminance, _, _, _ = calculate_sample_contribution(sample, scene, cam_transform, plane_size, resolution)
+            else:
+                luminance, _, _, _ = calculate_sample_contribution_bidir(sample, scene, cam_transform, plane_size, resolution)
             integrand += luminance / N
             i += 1
 
         sample = rng.random(mi.ArrayXf, (sample_size,1))
 
         dr.enable_grad(sample)
-        luminance, res, pixel_x, pixel_y = calculate_sample_contribution(sample, scene, cam_transform, plane_size, resolution)
+        if not bdpt:
+            luminance, res, pixel_x, pixel_y = calculate_sample_contribution(sample, scene, cam_transform, plane_size, resolution)
+        else:
+            luminance, res, pixel_x, pixel_y = calculate_sample_contribution_bidir(sample, scene, cam_transform, plane_size, resolution)
+        
         dr.backward(dr.log(dr.maximum(luminance, 1e-8)), dr.ADFlag.AllowNoGrad)
         gradlog = dr.grad(sample)
         
@@ -135,7 +143,10 @@ class LMC(mi.Integrator):
             prop_sample_eval = prop_sample - dr.floor(prop_sample)
             dr.enable_grad(prop_sample_eval)
             # Calculate proposal luminance
-            prop_luminance, prop_res, prop_pixel_x, prop_pixel_y = calculate_sample_contribution(prop_sample_eval, scene, cam_transform, plane_size, resolution)
+            if not bdpt:
+                prop_luminance, prop_res, prop_pixel_x, prop_pixel_y = calculate_sample_contribution(prop_sample_eval, scene, cam_transform, plane_size, resolution)
+            else:
+                prop_luminance, prop_res, prop_pixel_x, prop_pixel_y = calculate_sample_contribution_bidir(prop_sample_eval, scene, cam_transform, plane_size, resolution)
             # dr.backward(dr.log(dr.maximum(prop_luminance, 1e-8)), dr.ADFlag.AllowNoGrad)
             # TODO Experiment: dr.log(prop_luminance + 1e-3) seems to perform slightly better than 
             # dr.log(dr.maximum(prop_luminance, 1e-8))
@@ -263,7 +274,7 @@ class LMC(mi.Integrator):
 
 
 
-
+    # TODO Shitty test thingy, didn't really work. Should probably just remove
     @dr.syntax
     def render_ref(self,
                 scene: mi.Scene,

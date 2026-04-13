@@ -13,14 +13,14 @@ dr.set_flag(dr.JitFlag.Debug, True)
 #dr.set_flag(dr.ADFlag.AllowNoGrad, True)
 
 # Before importing own code!
-mi.set_variant("llvm_ad_rgb_double")
+mi.set_variant("llvm_ad_rgb_double") # Only with manually-compiled mitsuba
 
 import matplotlib.pyplot as plt
 from lmc_integrator import LMC
 from trace_path import calculate_sample_contribution, calculate_sample_contribution_ref
 from utils import render_ref, render_convergence, render_mc
 
-def render_scene(method, scene, scene_name, ref_rmsediff, 
+def render_scene(method, bdpt, scene, scene_name, ref_rmsediff, 
                 N, use_cached = True, integrand_samples = 100000,
                 stepsize = 0.01,
                 large_mut_chance = 0.0001,
@@ -34,7 +34,9 @@ def render_scene(method, scene, scene_name, ref_rmsediff,
                 dimin_adapt_coeff_m = 0.00000001,
                 seed = 0):
     if method == "lmc":
-        fileName = f'lmc_{N}_{integrand_samples}_{stepsize}_{large_mut_chance}'
+        fileName = f'lmc'
+        if bdpt: fileName += f'_bdpt'
+        fileName += f'_{N}_{integrand_samples}_{stepsize}_{large_mut_chance}'
         if precond:
             fileName += f'_pre_{beta}_{delta}'
         if momentum:
@@ -49,7 +51,7 @@ def render_scene(method, scene, scene_name, ref_rmsediff,
 
         def render_function():
             lmc = LMC()
-            return lmc.render(scene, scene.sensors()[0], N, integrand_samples, False, 
+            return lmc.render(scene, scene.sensors()[0], bdpt, N, integrand_samples, False, 
                               stepsize, large_mut_chance, 
                               precond, beta, delta, 
                               momentum, alpha, 
@@ -80,16 +82,26 @@ def render_scene(method, scene, scene_name, ref_rmsediff,
                               seed)
 
     if method == "pss":
-        fileName = f'pss_{N}_{integrand_samples}_{stepsize}_{large_mut_chance}'
+        fileName = f'pss'
+        if bdpt: fileName += f'_bdpt'
+        fileName = f'_{N}_{integrand_samples}_{stepsize}_{large_mut_chance}'
         def render_function():
             lmc = LMC()
-            return lmc.render(scene, scene.sensors()[0], N, integrand_samples, True, stepsize, large_mut_chance)
+            return lmc.render(scene, scene.sensors()[0], bdpt, N, integrand_samples, True, stepsize, large_mut_chance)
 
     if method == "mc":
-        fileName = f'mc_{N}'
+        fileName = f'mc'
+        if bdpt: fileName += f'_bdpt'
+        fileName += f'_{N}'
         def render_function():
-            return render_mc(scene, scene.sensors()[0], N, True), 0
+            return render_mc(scene, scene.sensors()[0], bdpt, N, True), 0
     
+    # Create cache folder if it does not exist yet
+    if not Path(f'cache').exists():
+        Path(f'cache').mkdir()
+    if not Path(f'cache/{scene_name}').exists():
+        Path(f'cache/{scene_name}').mkdir()
+
     pathStr = f'cache/{scene_name}/{fileName}.exr'
     pngPathStr = f'cache/{scene_name}/{fileName}.png'
     acceptRatioPathStr = f'cache/{scene_name}/{fileName}.acceptratio'
@@ -170,7 +182,7 @@ def plot_convergence(methods, scene, scene_name, ref_rmsediff,
                                                     if fullMethodName not in methodsHad:
                                                         rmses = []
                                                         for i in l_samples:
-                                                            img, rmse, acceptratio, diffimage = render_scene(method, scene, scene_name, 
+                                                            img, rmse, acceptratio, diffimage = render_scene(method, False, scene, scene_name, 
                                                                     ref_rmsediff, N=i * 1000000,
                                                                     use_cached=use_cached, integrand_samples=integrand_samples,
                                                                     stepsize=stepsize, large_mut_chance=large_mut_chance, 
@@ -192,6 +204,8 @@ def plot_convergence(methods, scene, scene_name, ref_rmsediff,
 
 scene = mi.load_file("../scenes/scene.xml")
 scene_name = "cornell_box"
+scene = mi.load_file("../scenes/scene_directional.xml")
+scene_name = "cornell_box_directional"
 #scene = mi.load_file("../scenes/scene_metal.xml")
 #scene_name = "cornell_box_metal"
 #scene = mi.load_file("../scenes/veach-ajar/scene.xml")
@@ -201,40 +215,41 @@ scene_name = "cornell_box"
 #scene = mi.load_file("../scenes/empty_box.xml")
 #scene_name = "empty_box"
 
-# plot_convergence(["mc", "lmc"], scene, scene_name, 0.5, use_cached=True,               
-#                 l_samples = [1, 3, 10, 30, 100, 300, 1000],# , 3000, 10000],
-#                 l_integrand_samples = [100000, 10000000],
-#                 l_stepsize = [0.01],
-#                 l_large_mut_chance = [0.0001],
-#                 l_precond = [True],
-#                 l_beta = [0.999],
-#                 l_delta = [0.001],
-#                 l_momentum = [False],
-#                 l_alpha = [0.9],
-#                 l_dimin_adapt = [False],
-#                 l_dimin_adapt_coeff_M = [0.000000001],
-#                 l_dimin_adapt_coeff_m = [0.00000001],
-#                 seed = 0)
+plot_convergence(["mc", "lmc", "pss"], scene, scene_name, 0.01, use_cached=True,               
+                l_samples = [1, 3, 10, 30],#, 100, 300, 1000],# , 3000, 10000],
+                l_integrand_samples = [1000000],
+                l_stepsize = [0.001],
+                l_large_mut_chance = [0.05, 0.001],
+                l_precond = [True],
+                l_beta = [0.999],
+                l_delta = [0.001],
+                l_momentum = [True, False],
+                l_alpha = [0.9],
+                l_dimin_adapt = [False],
+                l_dimin_adapt_coeff_M = [0.000000001],
+                l_dimin_adapt_coeff_m = [0.00000001],
+                seed = 0)
 
 # img = render_mc(scene, scene.sensors()[0], 500000)
 # img = mi.render(scene, integrator=pathtracer, spp=20)
 # img = render_convergence(scene, 0.0001)
-img, rmse, acceptratio, diffimg = render_scene("mc", scene, N=3 * 1000000, scene_name=scene_name, 
-                ref_rmsediff=1, use_cached=False, integrand_samples=300000,
-                stepsize=0.001, large_mut_chance=0.05, 
-                precond=True, beta=0.999, delta=0.001, 
-                momentum=False, alpha=0.9,
-                dimin_adapt=False, dimin_adapt_coeff_M=1e-9, dimin_adapt_coeff_m=1e-8,
-                seed=0)
-#img = render_convergence(scene, scene_name, 0.5, True)
+# img, rmse, acceptratio, diffimg = render_scene("lmc", bdpt=False, scene=scene, scene_name=scene_name, 
+#                 N=3 * 1000000,
+#                 ref_rmsediff=0.01, use_cached=True, integrand_samples=1000000,
+#                 stepsize=0.001, large_mut_chance=0.001, 
+#                 precond=True, beta=0.999, delta=0.001, 
+#                 momentum=True, alpha=0.9,
+#                 dimin_adapt=False, dimin_adapt_coeff_M=1e-9, dimin_adapt_coeff_m=1e-8,
+#                 seed=0)
+# img = render_convergence(scene, scene_name, 0.1, True)
 
 # _, rmse, img = render_scene("pss", scene, N=10 * 1000000, use_cached=True, integrand_samples=100000,
 #                  stepsize=0.1, large_mut_chance=0.001)
 
-plt.axis("off")
-plt.imshow(img ** (1.0 / 2.2)); # approximate sRGB tonemapping TODO why this needed?
+#plt.axis("off")
+#plt.imshow(img ** (1.0 / 2.2)); # approximate sRGB tonemapping TODO why this needed?
 
-plt.figure()
-plt.imshow(diffimg ** (1/2.2))
-plt.show()
+#plt.figure()
+#plt.imshow(diffimg ** (1/2.2))
+#plt.show()
 

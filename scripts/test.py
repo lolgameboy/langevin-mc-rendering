@@ -107,7 +107,7 @@ def calculate_sample_contribution(sample, scene, cam_transform, plane_size, reso
             u_bsdf,
             active
         )
-        print(bsdf_sample, bsdf_weight)
+        #print(bsdf_sample, bsdf_weight)
         
         throughput *= bsdf_weight
 
@@ -182,7 +182,7 @@ for i in range(0):
         print(f'log luminance: {ll}, gradient {i}: {g}, log luminance after: {lla}, err:{(lla - ll) - g}')
         sample[i] -= eps
 
-for i in range(0):
+for i in range(5):
     sample = rng.random(mi.ArrayXf, (sample_size,1))
     dr.enable_grad(sample)
     print("BEFORE")
