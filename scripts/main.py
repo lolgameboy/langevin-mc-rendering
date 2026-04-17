@@ -204,8 +204,11 @@ def plot_convergence(methods, scene, scene_name, ref_rmsediff,
 
 scene = mi.load_file("../scenes/scene.xml")
 scene_name = "cornell_box"
-scene = mi.load_file("../scenes/scene_directional.xml")
-scene_name = "cornell_box_directional"
+# TODO Cropping does not work yet, my calc_sample_contrib does not handle it correctly
+# scene = mi.load_file("../scenes/scene_cropped.xml")
+# scene_name = "cornell_box_cropped"
+# scene = mi.load_file("../scenes/scene_directional.xml")
+# scene_name = "cornell_box_directional"
 #scene = mi.load_file("../scenes/scene_metal.xml")
 #scene_name = "cornell_box_metal"
 #scene = mi.load_file("../scenes/veach-ajar/scene.xml")
@@ -215,26 +218,26 @@ scene_name = "cornell_box_directional"
 #scene = mi.load_file("../scenes/empty_box.xml")
 #scene_name = "empty_box"
 
-plot_convergence(["mc", "lmc", "pss"], scene, scene_name, 0.01, use_cached=True,               
-                l_samples = [1, 3, 10, 30],#, 100, 300, 1000],# , 3000, 10000],
-                l_integrand_samples = [1000000],
-                l_stepsize = [0.001],
-                l_large_mut_chance = [0.05, 0.001],
-                l_precond = [True],
-                l_beta = [0.999],
-                l_delta = [0.001],
-                l_momentum = [True, False],
-                l_alpha = [0.9],
-                l_dimin_adapt = [False],
-                l_dimin_adapt_coeff_M = [0.000000001],
-                l_dimin_adapt_coeff_m = [0.00000001],
-                seed = 0)
+# plot_convergence(["mc", "lmc", "pss"], scene, scene_name, 0.001, use_cached=True,               
+#                 l_samples = [1, 3, 10, 30, 100, 300],#, 1000],# , 3000, 10000],
+#                 l_integrand_samples = [10000000],
+#                 l_stepsize = [0.001],
+#                 l_large_mut_chance = [0.05],
+#                 l_precond = [True],
+#                 l_beta = [0.999],
+#                 l_delta = [0.001],
+#                 l_momentum = [True],
+#                 l_alpha = [0.9],
+#                 l_dimin_adapt = [True],
+#                 l_dimin_adapt_coeff_M = [0.000000001],
+#                 l_dimin_adapt_coeff_m = [0.00000001],
+#                 seed = 0)
 
-# img = render_mc(scene, scene.sensors()[0], 500000)
+img = render_mc(scene, scene.sensors()[0], False, 1000000)
 # img = mi.render(scene, integrator=pathtracer, spp=20)
 # img = render_convergence(scene, 0.0001)
 # img, rmse, acceptratio, diffimg = render_scene("lmc", bdpt=False, scene=scene, scene_name=scene_name, 
-#                 N=3 * 1000000,
+#                 N=1 * 1000000,
 #                 ref_rmsediff=0.01, use_cached=True, integrand_samples=1000000,
 #                 stepsize=0.001, large_mut_chance=0.001, 
 #                 precond=True, beta=0.999, delta=0.001, 
@@ -246,10 +249,10 @@ plot_convergence(["mc", "lmc", "pss"], scene, scene_name, 0.01, use_cached=True,
 # _, rmse, img = render_scene("pss", scene, N=10 * 1000000, use_cached=True, integrand_samples=100000,
 #                  stepsize=0.1, large_mut_chance=0.001)
 
-#plt.axis("off")
-#plt.imshow(img ** (1.0 / 2.2)); # approximate sRGB tonemapping TODO why this needed?
+plt.axis("off")
+plt.imshow(img ** (1.0 / 2.2)); # approximate sRGB tonemapping TODO why this needed?
 
-#plt.figure()
-#plt.imshow(diffimg ** (1/2.2))
-#plt.show()
+# plt.figure()
+# plt.imshow(diffimg ** (1/2.2))
+plt.show()
 

@@ -5,7 +5,7 @@ from pss_sampler import PssSampler
 
 # Essentially the path tracing function
 @dr.syntax
-def calculate_sample_contribution(sample, scene, cam_transform, plane_size, resolution, max_depth = 6):
+def calculate_sample_contribution(sample, scene, cam_transform, plane_size, resolution, max_depth = 10):
     pss_sampler = PssSampler(sample)
     # Sample an initial ray through the image plane
     ray_origin_local = mi.Vector3f(0, 0, 0)
@@ -22,26 +22,24 @@ def calculate_sample_contribution(sample, scene, cam_transform, plane_size, reso
     ray = mi.Ray3f(o=cam_transform.translation() + ray_origin_local, d=cam_transform.transform_affine(ray_direction_local))
 
     active = mi.Bool(True)
-    throughput = 1
+    throughput = mi.Color3f(1,1,1)
     L = mi.Spectrum(0.0)
 
     # ------------------------------------------------------------------
     # Path tracing loop
     # ------------------------------------------------------------------
     si = scene.ray_intersect(ray, active)
-    mis_weight = 1
-    for depth in range(max_depth):
+    mis_weight = mi.Float(1)
+    depth = mi.Int(1)
+    active = si.is_valid()
+    while mi.Bool(active):
         bsdf = si.bsdf()
         ctx = mi.BSDFContext()
-
-        # Stop if no hit
-        active = active & si.is_valid()
 
         emitter = si.emitter(scene)
         L += dr.select(active, throughput * emitter.eval(si, active) * mis_weight, mi.luminance(0))
 
         # Add light ray
-        # TODO light ray active checks
         ds, weight = scene.sample_emitter_direction(si, pss_sampler.next_2d())
 
         # ds.d is unit direction from si point to sampled point on emitter
@@ -50,18 +48,11 @@ def calculate_sample_contribution(sample, scene, cam_transform, plane_size, reso
         bsdf_pdf = bsdf.pdf(ctx, si, wo, active)
 
         light_pdf = ds.pdf
-        # TODO Small bias because of fix to division by 0 when inactive. How fix? 
-        # Can probably be fixed if I get the active mask right finally
-        mis_weight = light_pdf / (light_pdf + bsdf_pdf + 1e-10)
+        mis_weight = light_pdf / (light_pdf + bsdf_pdf + 1e-12)
 
         L += dr.select(active, throughput * weight * bsdf_val * mis_weight, mi.luminance(0))
 
         # Volgens mij include weight al wel als lichtbron niet zichtbaar is, omdat we hier geen valid bool als return krijgen
-
-        # TODO Doesnt work because active is symbolic or something
-        #if not active:
-        #    print("No hit!")
-        #    break
 
         # BSDF sampling
 
@@ -101,19 +92,23 @@ def calculate_sample_contribution(sample, scene, cam_transform, plane_size, reso
             mis_weight = mi.Float(1)
 
         si = si_next
+        depth += 1
 
-        # TODO TEMP Disabled
-        # Russian roulette
-        #rr_prob = 1
-        # TODO I think this isn't correct for pss because f(x) is now not a correct function of x (the sample) because it 
-        # does not deterministically depend on x
-        #rr_sample = rng.random(mi.Float, (1))
-        #survive = rr_sample < rr_prob
-        #throughput /= rr_prob
+        # Stop if no hit
+        active = active & si.is_valid()
 
-        #active &= survive
+        # Stop if max depth reached
+        active = active & (depth < max_depth)
 
-    luminance = mi.luminance(L) # TODO This is where luminance weights come in
+        # Russian roulette, starting from depth 4
+        if depth >= 4:
+            rr_prob = dr.minimum(dr.max(throughput), mi.Float(0.95))
+            rr_sample = pss_sampler.next_1d()
+            survive = mi.Bool(rr_sample < rr_prob)
+            throughput /= rr_prob
+            active = active & survive
+
+    luminance = mi.luminance(L)
     # luminance = dr.sum(L) / 3
     return luminance, L, pixel_x, pixel_y
         
